@@ -3,12 +3,9 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";
 import { TS_SKIP } from "./crap.ts";
+import { npmSpec } from "./tools.ts";
 import { run } from "./util.ts";
 
-// Pinned tool versions: a new release must not change the gate silently.
-export const DEPCRUISE = "dependency-cruiser@18.3.1";
-const TYPESCRIPT = "typescript@5.9.3";
-export const KNIP = "knip@6.36.0";
 const EXT_GLOB = "{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 
 export type Cycle = { key: string; text: string };
@@ -31,7 +28,8 @@ function depConfig(o: Opts) {
 export function depcruise(o: Opts): Deps {
   const outFile = join(o.out, "depcruise.json");
   rmSync(outFile, { force: true });
-  const args = ["-y", "-p", DEPCRUISE, "-p", TYPESCRIPT, "depcruise", "--config", depConfig(o), "--output-type", "json", "--output-to", outFile, ...o.dirs];
+  const pins = ["-p", npmSpec("dependency-cruiser", o.toml.tools), "-p", npmSpec("typescript", o.toml.tools)];
+  const args = ["-y", ...pins, "depcruise", "--config", depConfig(o), "--output-type", "json", "--output-to", outFile, ...o.dirs];
   const r = run("npx", args, o.repo, { timeout: 600_000 });
   writeFileSync(join(o.out, "depcruise.log"), r.out + r.err);
   if (!existsSync(outFile)) return { error: `depcruise failed (exit ${r.code}), see depcruise.log`, cycles: [], layers: [] };
@@ -70,7 +68,7 @@ function knipConfig(o: Opts) {
 
 export function knip(o: Opts): Knip {
   if (!existsSync(join(o.repo, "package.json"))) return { error: "", counts: {}, files: [], exports: [] };
-  const r = run("npx", ["-y", KNIP, "--config", knipConfig(o), "--reporter", "json", "--no-exit-code"], o.repo, { timeout: 600_000 });
+  const r = run("npx", ["-y", npmSpec("knip", o.toml.tools), "--config", knipConfig(o), "--reporter", "json", "--no-exit-code"], o.repo, { timeout: 600_000 });
   writeFileSync(join(o.out, "knip.json"), r.out);
   writeFileSync(join(o.out, "knip.log"), r.err);
   try {

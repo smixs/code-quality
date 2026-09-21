@@ -6,6 +6,7 @@ import { buildOpts, DEFAULTS, type Opts, readArgs } from "./config.ts";
 import { changes, type Changes } from "./diff.ts";
 import { auditCheck, gitleaksCheck, lockAgeCheck, newPackageCheck, type SecurityDeps } from "./security.ts";
 import { secretCheck } from "./text.ts";
+import { installHint } from "./tools.ts";
 import type { run } from "./util.ts";
 
 const root = join(import.meta.dir, "../../.scratch/quality/security-tests");
@@ -54,7 +55,7 @@ describe("secret/gitleaks", () => {
     expect(gitleaksCheck(options(repo), deps).findings).toEqual([]);
     expect(scanArgs).toContain("--log-opts=HEAD..HEAD");
     const missing = fake(() => result(-1, "", "spawnSync gitleaks ENOENT"));
-    expect(gitleaksCheck(options(tmp()), missing).notices).toEqual(["secret/gitleaks: not installed (brew install gitleaks)"]);
+    expect(gitleaksCheck(options(tmp()), missing).notices).toEqual([`secret/gitleaks: not installed (${installHint("gitleaks")})`]);
   });
 
   test("blocks report findings without gitleaks:allow and does not print the secret", () => {

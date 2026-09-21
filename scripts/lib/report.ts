@@ -3,8 +3,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Fn, riskCrap, type Tests } from "./crap.ts";
-import { DEPCRUISE, type Deps, KNIP, type Knip } from "./deps.ts";
+import type { Deps, Knip } from "./deps.ts";
 import { type Analysis, meanCrap, redText } from "./gate.ts";
+import { npmSpec } from "./tools.ts";
 import { type Check, findingLine, gitPaths, lines, run } from "./util.ts";
 
 // CRAP never drops below cc, so above 8 only a split brings a function to CRAP <= 8.
@@ -95,7 +96,7 @@ export function writeReport(o: Opts, a: Analysis, g: { checks: Check[]; drift: s
   L.push("## Worklist (CRAP x commits in 12 months)", ...worklist(a.fns, ch).map((w) => `- ${w.action}: ${w.f.file}:${w.f.start} ${w.f.name} (cc ${w.f.cc}, cov ${pct(w.f.cov)}, CRAP ${riskCrap(w.f).toFixed(1)})`), "");
   L.push(`## Hotspots (commits x sum CRAP of risky functions: CRAP > ${RISKY_CRAP} or cc > ${RISKY_CC})`, "| file | commits | risky fns | sum CRAP | score |", "|---|---|---|---|---|", ...hotspots(a.fns, ch).map((h) => `| ${h.file} | ${h.commits} | ${h.risky} | ${h.crap.toFixed(0)} | ${h.score.toFixed(0)} |`), "");
   L.push("## Top 30 CRAP", ...[...a.fns].sort((x, y) => riskCrap(y) - riskCrap(x)).slice(0, 30).map((f) => `- ${riskCrap(f).toFixed(1)} cc ${f.cc} cov ${pct(f.cov)} ${f.file}:${f.start}-${f.end} ${f.name}`), "");
-  L.push(`## Dependencies (${DEPCRUISE})`, ...depLines(a.deps), "", `## Dead code (${KNIP}, full output in knip.json)`, ...knipLines(a.knip), "");
+  L.push(`## Dependencies (${npmSpec("dependency-cruiser", o.toml.tools)})`, ...depLines(a.deps), "", `## Dead code (${npmSpec("knip", o.toml.tools)}, full output in knip.json)`, ...knipLines(a.knip), "");
   const path = join(o.out, name);
   writeFileSync(path, L.join("\n"));
   writeFileSync(path.replace(/\.md$/, ".json"), JSON.stringify({ checks: g.checks, bypasses, escalate: g.escalate }, null, 1));

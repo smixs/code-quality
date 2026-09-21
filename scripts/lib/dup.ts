@@ -3,9 +3,8 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:
 import { join, relative } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, isTouched } from "./diff.ts";
+import { installHint, npmSpec } from "./tools.ts";
 import { check, type Finding, notedCheck, run } from "./util.ts";
-
-export const JSCPD = "jscpd@5.2.1";
 
 type Side = { name: string; start: number; end: number };
 
@@ -28,9 +27,9 @@ export function dupCheck(o: Opts, ch: Changes, files: string[]) {
   const dir = join(o.out, "jscpd");
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  const args = ["-y", JSCPD, "--absolute", "--reporters", "json", "--output", dir, "--min-tokens", String(o.toml.thresholds.dup_min_tokens), ...todo];
+  const args = ["-y", npmSpec("jscpd", o.toml.tools), "--absolute", "--reporters", "json", "--output", dir, "--min-tokens", String(o.toml.thresholds.dup_min_tokens), ...todo];
   const r = run("npx", args, o.repo, { timeout: 300_000 });
-  if (r.code === -1) return notedCheck("dup", [], "", ["dup/jscpd: not run (npx not found; install Node.js, then npm install -g jscpd@5.2.1)"]);
+  if (r.code === -1) return notedCheck("dup", [], "", [`dup/jscpd: not run (npx not found; ${installHint("jscpd", o.toml.tools)})`]);
   const report = join(dir, "jscpd-report.json");
   if (!existsSync(report)) return check("dup", [], `jscpd failed (exit ${r.code}): ${(r.err || r.out).slice(0, 300)}`);
   const dups: any[] = JSON.parse(readFileSync(report, "utf8")).duplicates ?? [];

@@ -3,13 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { adapterById, detectLanguageRoots } from "./lang.ts";
+import { validateToolOverrides } from "./tools.ts";
 import { mainCheckout, splitList } from "./util.ts";
 
 export const CONFIG_FILE = ".quality.toml";
 
 // One bar everywhere (owner, 18.09.2026): changed functions gate on cc/CRAP; repo mean is a warning threshold.
 export const DEFAULTS = {
-  project: { language: "" as string | string[], src: ["."], base: "origin/main", test_cmd: "" },
+  project: { language: "" as string | string[], src: ["."], base: "origin/main", test_cmd: "", tools_dir: "" },
   thresholds: {
     max_cc: 10,
     max_crap: 30,
@@ -24,6 +25,8 @@ export const DEFAULTS = {
     min_release_age_days: 1,
   },
   layers: { forbid: [] as string[] },
+  // Free-form: the keys are tool ids from tools.ts, the values a version or a binary path.
+  tools: {} as Record<string, string>,
   knip: { ignore: [] as string[] },
   glossary: { path: "", marker: "_Avoid_:", allow: [] as string[], globs: ["**/*.md"], commit_msg: true },
   docs: { globs: ["*.md", "docs/**/*.md"], history_globs: ["docs/adr/**", "CHANGELOG.md", "**/CHANGELOG.md"] },
@@ -88,9 +91,11 @@ function validate(t: Record<string, any>, file: string) {
   for (const [section, body] of Object.entries(t)) {
     const known = (DEFAULTS as Record<string, object>)[section];
     if (!known) throw new Error(`${file}: unknown section [${section}]`);
+    if (section === "tools") continue;
     const bad = Object.keys(body).filter((k) => !(k in known));
     if (bad.length) throw new Error(`${file}: unknown key(s) in [${section}]: ${bad.join(", ")}`);
   }
+  validateToolOverrides(t.tools, file);
   validateLanguages(t.project?.language, file);
 }
 

@@ -4,9 +4,9 @@ import { isAbsolute, join, relative } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, isTouched } from "./diff.ts";
 import { adapterForFile, type LanguageAdapter, type LanguageId } from "./lang.ts";
+import { installHint, npmSpec, pinnedVersion, toolBinary } from "./tools.ts";
 import { check, type Finding, notedCheck, run } from "./util.ts";
 
-export const AST_GREP = "@ast-grep/cli@0.45.3";
 const SG_CONFIG = join(import.meta.dir, "../../rules/sgconfig.yml");
 const SEMGREP_CONFIG = join(import.meta.dir, "../../rules/semgrep.yml");
 const SKIP = /(^|\/)(node_modules|fixtures|\.scratch|dist|build|target|\.venv)\//;
@@ -58,10 +58,12 @@ function inlineRules(adapter: LanguageAdapter) {
 }
 
 // System ast-grep when it is the pinned version, else the pinned npm package.
-function sgCommand(repo: string): [string, string[]] {
-  const version = run("ast-grep", ["--version"], repo);
-  if (version.code === 0 && version.out.includes(AST_GREP.split("@").pop()!)) return ["ast-grep", []];
-  return ["npx", ["-y", "-p", AST_GREP, "ast-grep"]];
+function sgCommand(o: Opts): [string, string[]] {
+  const spec = npmSpec("ast-grep", o.toml.tools);
+  const binary = toolBinary("ast-grep", o.toml.tools);
+  const version = run(binary, ["--version"], o.repo);
+  if (version.code === 0 && version.out.includes(pinnedVersion(spec))) return [binary, []];
+  return ["npx", ["-y", "-p", spec, "ast-grep"]];
 }
 
 function findingOf(match: any, ch: Changes, repo: string): Finding | null {
@@ -84,7 +86,7 @@ function astGroup(context: AstContext) {
   const [cmd, pre] = command;
   const args = adapter.id === "ts" ? ["scan", "-c", SG_CONFIG, "--json=compact", ...files] : ["scan", "--inline-rules", inlineRules(adapter), "--json=compact", ...files];
   const result = run(cmd, [...pre, ...args], o.repo, { timeout: 300_000 });
-  if (result.code === -1) return { findings: [] as Finding[], errors: [] as string[], notices: [`ast/${adapter.id}: not run (ast-grep not found; npm install -g @ast-grep/cli@0.45.3)`] };
+  if (result.code === -1) return { findings: [] as Finding[], errors: [] as string[], notices: [`ast/${adapter.id}: not run (ast-grep not found; ${installHint("ast-grep", o.toml.tools)})`] };
   try {
     const findings = parseMatches(result.out).map((match) => findingOf(match, ch, o.repo)).filter((item): item is Finding => item !== null);
     const notices = AST[adapter.id].catchKind ? [] : [`ast/empty-catch: not run (${adapter.name} has no catch construct)`];
@@ -98,7 +100,7 @@ function astGroup(context: AstContext) {
 export function astCheck(o: Opts, ch: Changes) {
   const todo = [...ch.keys()].filter((file) => adapterForFile(o.langs, file) && !SKIP.test(file) && existsSync(join(o.repo, file)));
   if (!todo.length) return check("ast", []);
-  const command = sgCommand(o.repo);
+  const command = sgCommand(o);
   const groups = Map.groupBy(todo, (file) => adapterForFile(o.langs, file)!);
   const results = [...groups].map(([adapter, files]) => astGroup({ o, ch, adapter, files, command }));
   return { name: "ast", findings: results.flatMap((item) => item.findings), error: results.flatMap((item) => item.errors).join("; "), note: "", notices: results.flatMap((item) => item.notices) };
@@ -110,9 +112,10 @@ const REAL_SEMGREP: SemgrepDeps = { run };
 export function semgrepCheck(o: Opts, ch: Changes, deps: SemgrepDeps = REAL_SEMGREP) {
   const files = [...ch.keys()].filter((file) => adapterForFile(o.langs, file) && !SKIP.test(file) && existsSync(join(o.repo, file)));
   if (!files.length) return check("security/semgrep", []);
-  const version = deps.run("semgrep", ["--version"], o.repo);
-  if (version.code === -1) return notedCheck("security/semgrep", [], "", ["security/semgrep: not run (semgrep not found; pipx install semgrep)"]);
-  const result = deps.run("semgrep", ["--config", SEMGREP_CONFIG, "--json", "--quiet", ...files], o.repo, { timeout: 300_000 });
+  const semgrep = toolBinary("semgrep", o.toml.tools);
+  const version = deps.run(semgrep, ["--version"], o.repo);
+  if (version.code === -1) return notedCheck("security/semgrep", [], "", [`security/semgrep: not run (semgrep not found; ${installHint("semgrep", o.toml.tools)})`]);
+  const result = deps.run(semgrep, ["--config", SEMGREP_CONFIG, "--json", "--quiet", ...files], o.repo, { timeout: 300_000 });
   return semgrepResult(result);
 }
 

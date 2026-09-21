@@ -3,11 +3,11 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, WHOLE } from "./diff.ts";
 import { adapterForFile, rootForFile, type LanguageRoot } from "./lang.ts";
+import { npmSpec, packageSpec, pinnedVersion, toolsDir } from "./tools.ts";
 import { git, gitPaths, lines, refuse, run } from "./util.ts";
 
 export type Range = { start: number; end: number; col: number; nested: [number, number][] };
@@ -22,9 +22,8 @@ const FN_TYPES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFun
 const SKIP_KEYS = new Set(["parent", "loc", "range", "tokens", "comments"]);
 const LABEL = /^(.*?) has a complexity of (\d+)\./;
 const FAIL_COUNTS = [/^\s*(\d+) fail\b/gm, /^\s*(\d+) failed\b/gm, /^ℹ fail (\d+)\b/gm, /^# fail (\d+)\b/gm, /^Tests\s+(\d+) failed\b/gm, /(\d+) failed\b/g];
-// Fallback toolchain when the repo has no eslint; pinned like every other tool.
-const FALLBACK_PKGS = ["eslint@10.8.0", "@typescript-eslint/parser@8.66.0", "typescript@5.9.3"];
-export const TOOLS = process.env.QG_TOOLS ?? join(homedir(), ".cache/quality-gate");
+// Fallback toolchain when the repo has no eslint; pinned in tools.ts like every other tool.
+const fallbackPkgs = (o: Opts) => ["eslint", "typescript-eslint-parser", "typescript"].map((id) => npmSpec(id, o.toml.tools));
 
 function defaultTestCmd(repo: string, lang: string) {
   if (lang === "py") return 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV"';
@@ -155,22 +154,23 @@ export function sourceFiles(o: Opts) {
   });
 }
 
-export function loadEslint(repo: string) {
-  const fromRepo = tryRequire(join(repo, "package.json"));
+export function loadEslint(o: Opts) {
+  const fromRepo = tryRequire(join(o.repo, "package.json"));
   if (fromRepo) return fromRepo;
-  ensureTools(FALLBACK_PKGS);
-  const fromTools = tryRequire(join(TOOLS, "package.json"));
-  if (!fromTools) throw new Error(`cannot load eslint + @typescript-eslint/parser from ${repo} or ${TOOLS}`);
+  const dir = toolsDir(o.toml.project.tools_dir);
+  ensureTools(fallbackPkgs(o), dir);
+  const fromTools = tryRequire(join(dir, "package.json"));
+  if (!fromTools) throw new Error(`cannot load eslint + @typescript-eslint/parser from ${o.repo} or ${dir}`);
   return fromTools;
 }
 
 // Install pinned packages into the tool cache once; never into the repo.
 // Every package is probed: one present as another's dependency (eslint under sonarjs) says nothing of the rest.
-export function ensureTools(pkgs: string[]) {
-  mkdirSync(TOOLS, { recursive: true });
-  if (pkgs.every((p) => existsSync(join(TOOLS, "node_modules", p.slice(0, p.lastIndexOf("@")), "package.json")))) return;
-  const r = run("npm", ["i", "--save-exact", "--prefix", TOOLS, ...pkgs], TOOLS, { timeout: 600_000 });
-  if (r.code !== 0) throw new Error(`npm i ${pkgs.join(" ")} into ${TOOLS} failed: ${r.err.slice(0, 300)}`);
+export function ensureTools(pkgs: string[], dir: string) {
+  mkdirSync(dir, { recursive: true });
+  if (pkgs.every((p) => existsSync(join(dir, "node_modules", p.slice(0, p.lastIndexOf("@")), "package.json")))) return;
+  const r = run("npm", ["i", "--save-exact", "--prefix", dir, ...pkgs], dir, { timeout: 600_000 });
+  if (r.code !== 0) throw new Error(`npm i ${pkgs.join(" ")} into ${dir} failed: ${r.err.slice(0, 300)}`);
 }
 
 function tryRequire(anchor: string) {
@@ -209,7 +209,7 @@ type AnalysisDeps = { run: typeof run; loadEslint: typeof loadEslint };
 function tsFunctions(o: Opts, files: string[], deps: AnalysisDeps): NativeFunctions {
   let loaded: ReturnType<typeof loadEslint>;
   try {
-    loaded = deps.loadEslint(o.repo);
+    loaded = deps.loadEslint(o);
   } catch {
     return { fns: [], fallback: files };
   }
@@ -284,9 +284,10 @@ function nestedRanges(fns: Fn[]) {
 
 function runLizard(o: Opts, root: LanguageRoot, files: string[], runner = run) {
   if (!root.adapter.lizardLang) return { fns: [] as Fn[], failed: [`not run: crap/cc (Lizard does not support ${root.adapter.name}; ${root.adapter.form.install})`] };
-  const args = ["tool", "run", "--from", "lizard==1.24.0", "lizard", "--csv", "-l", root.adapter.lizardLang, ...files];
+  const spec = packageSpec("lizard", o.toml.tools);
+  const args = ["tool", "run", "--from", spec, "lizard", "--csv", "-l", root.adapter.lizardLang, ...files];
   const result = runner("uv", args, o.repo, { timeout: 300_000 });
-  if (result.code !== 0) return { fns: [] as Fn[], failed: [`not run: crap/cc (lizard 1.24.0 failed for ${root.adapter.name}: ${(result.err || result.out).trim().slice(0, 160)}; install uv)`] };
+  if (result.code !== 0) return { fns: [] as Fn[], failed: [`not run: crap/cc (lizard ${pinnedVersion(spec, "==")} failed for ${root.adapter.name}: ${(result.err || result.out).trim().slice(0, 160)}; install uv)`] };
   const fns = parseLizardCsv(result.out).map((fn) => ({ ...fn, file: repoFile(o.repo, fn.file) }));
   nestedRanges(fns);
   return { fns, failed: [] as string[] };
@@ -344,7 +345,7 @@ export function parseRadonJson(out: string, repo: string) {
 
 function pyFunctions(o: Opts, files: string[], deps: AnalysisDeps): NativeFunctions {
   if (!files.length) return { fns: [], fallback: [] };
-  const result = deps.run("uvx", ["--from", "radon==6.0.1", "radon", "cc", "-j", ...files], o.repo, { timeout: 300_000 });
+  const result = deps.run("uvx", ["--from", packageSpec("radon", o.toml.tools), "radon", "cc", "-j", ...files], o.repo, { timeout: 300_000 });
   if (result.code !== 0) return { fns: [], fallback: files };
   try {
     const parsed = radonResult(result.out, o.repo);

@@ -2,6 +2,7 @@
 // each file to the deepest matching root instead of assigning one language to the whole repository.
 import { existsSync, readdirSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
+import { installHint } from "./tools.ts";
 
 export type LanguageId = "ts" | "py" | "go" | "rust" | "java" | "kotlin" | "csharp" | "swift" | "php" | "ruby" | "cpp" | "dart";
 export type ToolAdapter = { tool: string; command: string; install: string; format: string };
@@ -24,7 +25,7 @@ export type LanguageAdapter = {
 export type LanguageRoot = { adapter: LanguageAdapter; root: string };
 
 const tool = (name: string, command: string, install: string, format = "json"): ToolAdapter => ({ tool: name, command, install, format });
-const osv = (fallback?: string) => ({ ...tool("osv-scanner", "osv-scanner scan source --format json .", "brew install osv-scanner"), fallback });
+const osv = (fallback?: string) => ({ ...tool("osv-scanner", "osv-scanner scan source --format json .", installHint("osv-scanner")), fallback });
 const patterns = (test: string[], assert: string[], ...flags: [string[], string[], string[]]): TestPatterns => ({
   test, assert, skip: flags[0], only: flags[1], mock: flags[2],
 });
@@ -48,7 +49,7 @@ export const ADAPTERS: LanguageAdapter[] = [
   {
     id: "ts", name: "TypeScript/JavaScript", detect: ["package.json"], extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], lizardLang: "typescript",
     testGlobs: ["**/*.test.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", "**/*.spec.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"], testPatterns: JS_TEST,
-    coverage: tool("native JS test runner", "node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=\"$QG_LCOV\"", "install Node.js or Bun", "lcov"),
+    coverage: tool("native JS test runner", "node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=\"$QG_LCOV\"", installHint("node"), "lcov"),
     cycles: tool("dependency-cruiser", "npx dependency-cruiser --output-type json .", "npm install -D dependency-cruiser"),
     dead: tool("knip", "npx knip --reporter json --no-exit-code", "npm install -D knip"),
     form: tool("eslint", "npx eslint --format json .", "npm install -D eslint eslint-plugin-sonarjs"), audit: osv("npm audit --json / bun audit --json"),
@@ -65,9 +66,9 @@ export const ADAPTERS: LanguageAdapter[] = [
   {
     id: "go", name: "Go", detect: ["go.mod"], extensions: [".go"], lizardLang: "go",
     testGlobs: ["**/*_test.go"], testPatterns: patterns(["\\bfunc\\s+Test", "\\bt\\.Run\\s*\\("], ["\\b(?:assert|require)\\."], ["\\bt\\.Skip(?:f|Now)?\\s*\\("], [], ["\\bmock\\."]),
-    coverage: tool("go test/gcov2lcov", "go test ./... -coverprofile=coverage.out && gcov2lcov -infile coverage.out -outfile \"$QG_LCOV\"", "brew install go && go install github.com/jandelgado/gcov2lcov@latest", "lcov"),
-    cycles: tool("go list", "go list -json ./...", "brew install go"), dead: tool("deadcode", "deadcode -json ./...", "go install golang.org/x/tools/cmd/deadcode@latest"),
-    form: tool("gocyclo", "gocyclo -over 10 .", "go install github.com/fzipp/gocyclo/cmd/gocyclo@latest", "text"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "GO" },
+    coverage: tool("go test/gcov2lcov", "go test ./... -coverprofile=coverage.out && gcov2lcov -infile coverage.out -outfile \"$QG_LCOV\"", `${installHint("go")} && ${installHint("gcov2lcov")}`, "lcov"),
+    cycles: tool("go list", "go list -json ./...", installHint("go")), dead: tool("deadcode", "deadcode -json ./...", installHint("deadcode")),
+    form: tool("gocyclo", "gocyclo -over 10 .", installHint("gocyclo"), "text"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "GO" },
   },
   {
     id: "rust", name: "Rust", detect: ["Cargo.toml"], extensions: [".rs"], lizardLang: "rust",
@@ -79,16 +80,16 @@ export const ADAPTERS: LanguageAdapter[] = [
   {
     id: "java", name: "Java", detect: ["pom.xml", "build.gradle"], extensions: [".java"], lizardLang: "java",
     testGlobs: ["**/src/test/**/*.java", "**/*Test.java"], testPatterns: patterns(["@Test"], ["\\bassert[A-Z]\\w*\\s*\\("], ["@Disabled", "@Ignore"], [], ["\\bMockito\\.", "@Mock"]),
-    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:.scratch/quality/jacoco -reporttypes:lcov", "dotnet tool install -g dotnet-reportgenerator-globaltool", "lcov"),
-    cycles: tool("jdeps", "jdeps -dotoutput .scratch/quality/jdeps -verbose:class .", "install JDK 21", "dot"), dead: tool("PMD", "pmd check -d . -R category/java/bestpractices.xml -f sarif", "brew install pmd", "sarif"),
-    form: tool("PMD", "pmd check -d . -R category/java/design.xml -f sarif", "brew install pmd", "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
+    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:.scratch/quality/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
+    cycles: tool("jdeps", "jdeps -dotoutput .scratch/quality/jdeps -verbose:class .", "install JDK 21", "dot"), dead: tool("PMD", "pmd check -d . -R category/java/bestpractices.xml -f sarif", installHint("pmd"), "sarif"),
+    form: tool("PMD", "pmd check -d . -R category/java/design.xml -f sarif", installHint("pmd"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
   },
   {
     id: "kotlin", name: "Kotlin", detect: ["build.gradle.kts"], extensions: [".kt", ".kts"], lizardLang: "kotlin",
     testGlobs: ["**/src/test/**/*.kt", "**/*Test.kt"], testPatterns: patterns(["@Test"], ["\\bassert[A-Z]\\w*\\s*\\("], ["@Disabled", "@Ignore"], [], ["\\bmockk\\s*\\(", "@MockK"]),
-    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:.scratch/quality/jacoco -reporttypes:lcov", "dotnet tool install -g dotnet-reportgenerator-globaltool", "lcov"),
-    cycles: tool("Konsist", "./gradlew konsistTest", "add Konsist or ArchUnit tests", "text"), dead: tool("detekt", "detekt --report sarif:.scratch/quality/detekt.sarif", "brew install detekt", "sarif"),
-    form: tool("detekt", "detekt --report sarif:.scratch/quality/detekt.sarif", "brew install detekt", "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
+    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:.scratch/quality/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
+    cycles: tool("Konsist", "./gradlew konsistTest", "add Konsist or ArchUnit tests", "text"), dead: tool("detekt", "detekt --report sarif:.scratch/quality/detekt.sarif", installHint("detekt"), "sarif"),
+    form: tool("detekt", "detekt --report sarif:.scratch/quality/detekt.sarif", installHint("detekt"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
   },
   {
     id: "csharp", name: "C#", detect: ["*.csproj", "*.sln"], extensions: [".cs"], lizardLang: "csharp",
@@ -100,14 +101,14 @@ export const ADAPTERS: LanguageAdapter[] = [
   {
     id: "swift", name: "Swift", detect: ["Package.swift"], extensions: [".swift"], lizardLang: "swift",
     testGlobs: ["**/Tests/**/*.swift", "**/*Tests.swift"], testPatterns: patterns(["\\bfunc\\s+test"], ["\\bXCTAssert"], ["\\bXCTSkip"], [], ["\\bMock\\w+"]),
-    coverage: tool("xccov2lcov", "xcrun xccov view --report --json .build/*.xcresult | xccov2lcov > \"$QG_LCOV\"", "brew install xccov2lcov", "lcov"),
-    cycles: tool("swift package", "swift package show-dependencies --format json", "install Xcode command-line tools"), dead: tool("periphery", "periphery scan --format json", "brew install peripheryapp/periphery/periphery"),
-    form: tool("SwiftLint", "swiftlint lint --reporter json", "brew install swiftlint"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "swiftpm", registry: "swift" },
+    coverage: tool("xccov2lcov", "xcrun xccov view --report --json .build/*.xcresult | xccov2lcov > \"$QG_LCOV\"", installHint("xccov2lcov"), "lcov"),
+    cycles: tool("swift package", "swift package show-dependencies --format json", "install Xcode command-line tools"), dead: tool("periphery", "periphery scan --format json", installHint("periphery")),
+    form: tool("SwiftLint", "swiftlint lint --reporter json", installHint("swiftlint")), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "swiftpm", registry: "swift" },
   },
   {
     id: "php", name: "PHP", detect: ["composer.json"], extensions: [".php"], lizardLang: "php",
     testGlobs: ["**/tests/**/*.php", "**/*Test.php"], testPatterns: patterns(["\\bfunction\\s+test"], ["\\$this->assert", "\\bself::assert"], ["markTestSkipped\\s*\\("], [], ["createMock\\s*\\(", "\\bMockery::"]),
-    coverage: tool("PHPUnit Clover/ReportGenerator", "reportgenerator -reports:clover.xml -targetdir:.scratch/quality/php -reporttypes:lcov", "composer require --dev phpunit/phpunit && dotnet tool install -g dotnet-reportgenerator-globaltool", "lcov"),
+    coverage: tool("PHPUnit Clover/ReportGenerator", "reportgenerator -reports:clover.xml -targetdir:.scratch/quality/php -reporttypes:lcov", `composer require --dev phpunit/phpunit && ${installHint("reportgenerator")}`, "lcov"),
     cycles: tool("deptrac", "vendor/bin/deptrac analyse --formatter=json", "composer require --dev qossmic/deptrac-shim"), dead: tool("PHPStan", "vendor/bin/phpstan analyse --error-format=json", "composer require --dev phpstan/phpstan"),
     form: tool("PHPMD", "phpmd . json cleancode,codesize", "composer require --dev phpmd/phpmd"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "composer", registry: "packagist" },
   },
@@ -121,9 +122,9 @@ export const ADAPTERS: LanguageAdapter[] = [
   {
     id: "cpp", name: "C/C++", detect: ["CMakeLists.txt", "Makefile"], extensions: [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"], lizardLang: "cpp",
     testGlobs: ["**/test/**/*.{c,cc,cpp,cxx}", "**/*_test.{c,cc,cpp,cxx}"], testPatterns: patterns(["\\bTEST(?:_F|_P)?\\s*\\("], ["\\b(?:EXPECT|ASSERT)_"], ["\\bGTEST_SKIP\\s*\\("], ["DISABLED_"], ["\\bMOCK_METHOD\\s*\\("]),
-    coverage: tool("gcov/ReportGenerator", "reportgenerator -reports:**/*.gcov.xml -targetdir:.scratch/quality/cpp -reporttypes:lcov", "dotnet tool install -g dotnet-reportgenerator-globaltool", "lcov"),
-    cycles: tool("include-what-you-use", "include-what-you-use .", "brew install include-what-you-use", "text"), dead: tool("clang-tidy", "clang-tidy -checks=misc-unused-*", "brew install llvm", "yaml"),
-    form: tool("clang-tidy", "clang-tidy -checks=readability-function-cognitive-complexity", "brew install llvm", "yaml"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "conan", registry: "conan-center" },
+    coverage: tool("gcov/ReportGenerator", "reportgenerator -reports:**/*.gcov.xml -targetdir:.scratch/quality/cpp -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
+    cycles: tool("include-what-you-use", "include-what-you-use .", installHint("include-what-you-use"), "text"), dead: tool("clang-tidy", "clang-tidy -checks=misc-unused-*", installHint("clang-tidy"), "yaml"),
+    form: tool("clang-tidy", "clang-tidy -checks=readability-function-cognitive-complexity", installHint("clang-tidy"), "yaml"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "conan", registry: "conan-center" },
   },
   {
     id: "dart", name: "Dart", detect: ["pubspec.yaml"], extensions: [".dart"], lizardLang: null,

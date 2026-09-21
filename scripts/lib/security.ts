@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import type { Opts } from "./config.ts";
 import type { Changes, FileDiff } from "./diff.ts";
 import { redactSensitiveText } from "./text.ts";
+import { installHint, toolBinary } from "./tools.ts";
 import { bypassNote, check, type Check, type Finding, notedCheck, run } from "./util.ts";
 
 type CmdResult = ReturnType<typeof run>;
@@ -26,7 +27,7 @@ export function gitleaksCheck(o: Opts, deps: SecurityDeps = REAL): Check {
   const report = join(o.out, "gitleaks.json");
   mkdirSync(o.out, { recursive: true });
   rmSync(report, { force: true });
-  const result = deps.run("gitleaks", ["git", `--log-opts=${o.base}..HEAD`, "--report-format", "json", "--report-path", report, "--redact", "--exit-code", "1"], o.repo);
+  const result = deps.run(toolBinary("gitleaks", o.toml.tools), ["git", `--log-opts=${o.base}..HEAD`, "--report-format", "json", "--report-path", report, "--redact", "--exit-code", "1"], o.repo);
   if (result.code !== 0 && result.code !== 1) {
     rmSync(report, { force: true });
     return check("secret/gitleaks", [], `gitleaks git: ${commandError(result)}`);
@@ -44,8 +45,8 @@ export function gitleaksCheck(o: Opts, deps: SecurityDeps = REAL): Check {
 
 function gitleaksUnavailable(o: Opts, deps: SecurityDeps) {
   if (!o.toml.security.gitleaks) return check("secret/gitleaks", [], "", "disabled by [security]");
-  const version = deps.run("gitleaks", ["version"], o.repo);
-  if (missingBinary(version)) return notedCheck("secret/gitleaks", [], "", ["secret/gitleaks: not installed (brew install gitleaks)"]);
+  const version = deps.run(toolBinary("gitleaks", o.toml.tools), ["version"], o.repo);
+  if (missingBinary(version)) return notedCheck("secret/gitleaks", [], "", [`secret/gitleaks: not installed (${installHint("gitleaks", o.toml.tools)})`]);
   if (version.code !== 0) return check("secret/gitleaks", [], `gitleaks version: ${commandError(version)}`);
   return null;
 }

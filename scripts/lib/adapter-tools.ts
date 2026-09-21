@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import type { LanguageRoot, ToolAdapter } from "./lang.ts";
+import { installHint, toolBinary } from "./tools.ts";
 import { check, type Check, type Finding, notedCheck, run } from "./util.ts";
 
 export type AdapterToolKind = "cycles" | "dead" | "form" | "audit";
@@ -31,7 +32,7 @@ const KIND_RULE: Record<AdapterToolKind, string> = {
   audit: "deps/audit",
 };
 
-const OSV = { tool: "osv-scanner", install: "brew install osv-scanner", format: "json", command: "" } satisfies ToolAdapter;
+const OSV = { tool: "osv-scanner", install: installHint("osv-scanner"), format: "json", command: "" } satisfies ToolAdapter;
 const AUDIT_LOCKFILES = new Set([
   "Cargo.lock", "Gemfile.lock", "Pipfile.lock", "bun.lock", "cabal.project.freeze", "composer.lock",
   "conan.lock", "deps.json", "gems.locked", "go.mod", "go.sum", "gradle.lockfile", "mix.lock",
@@ -77,7 +78,7 @@ function auditCheck(o: Opts, runner: Runner, env?: NodeJS.ProcessEnv): AdapterTo
   if (!lockfiles.length) return auditNotRun("osv-scanner: no packages found");
   const scans: AuditScan[] = [];
   for (const lockfile of lockfiles) {
-    const scan = scanLockfile(o.repo, lockfile, runner, env);
+    const scan = scanLockfile({ repo: o.repo, overrides: o.toml.tools, runner, env }, lockfile);
     if ("check" in scan) return scan.check;
     if ("empty" in scan) continue;
     scans.push(scan);
@@ -89,10 +90,13 @@ function auditCheck(o: Opts, runner: Runner, env?: NodeJS.ProcessEnv): AdapterTo
   return tagged("osv", "audit", notedCheck("deps/audit", findings, "", [`deps/audit: ${findings.length} finding(s) (${count}, osv-scanner)`]));
 }
 
-function scanLockfile(repo: string, lockfile: string, runner: Runner, env?: NodeJS.ProcessEnv): AuditScanResult {
+type ScanContext = { repo: string; overrides: Record<string, string>; runner: Runner; env?: NodeJS.ProcessEnv };
+
+function scanLockfile(context: ScanContext, lockfile: string): AuditScanResult {
+  const { repo, overrides, runner, env } = context;
   const absolute = join(repo, lockfile);
   const cwd = dirname(absolute);
-  const result = runner("osv-scanner", ["scan", "source", "--format", "json", "-L", basename(lockfile)], cwd, { timeout: 600_000, env });
+  const result = runner(toolBinary("osv-scanner", overrides), ["scan", "source", "--format", "json", "-L", basename(lockfile)], cwd, { timeout: 600_000, env });
   if (missingTool(result.code, result.err)) return { check: missingCheck({ adapter: "osv", kind: "audit", name: "deps/audit", rule: "deps/audit", tool: OSV }) };
   const skipped = auditSkipReason(result);
   if (skipped === "packages") return { empty: true };

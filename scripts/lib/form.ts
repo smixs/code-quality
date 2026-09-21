@@ -4,16 +4,17 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";
-import { ensureTools, isChanged, loadEslint, type Range, TOOLS, TS_GLOB, walk } from "./crap.ts";
+import { ensureTools, isChanged, loadEslint, type Range, TS_GLOB, walk } from "./crap.ts";
 import type { Changes } from "./diff.ts";
+import { npmSpec, toolsDir } from "./tools.ts";
 import { check, type Finding } from "./util.ts";
 
-export const SONARJS = "eslint-plugin-sonarjs@4.2.1";
 const FORM_RULES = new Set(["sonarjs/cognitive-complexity", "max-depth", "max-params", "max-lines-per-function"]);
 
-function sonarjs() {
-  ensureTools([SONARJS]);
-  const mod = createRequire(join(TOOLS, "package.json"))("eslint-plugin-sonarjs");
+function sonarjs(o: Opts) {
+  const dir = toolsDir(o.toml.project.tools_dir);
+  ensureTools([npmSpec("eslint-plugin-sonarjs", o.toml.tools)], dir);
+  const mod = createRequire(join(dir, "package.json"))("eslint-plugin-sonarjs");
   return mod.default ?? mod;
 }
 
@@ -25,7 +26,7 @@ function formConfig(o: Opts, parser: unknown) {
     "max-params": ["error", t.max_params],
     "max-lines-per-function": ["error", { max: t.max_lines_per_function, skipBlankLines: true, skipComments: true }],
   };
-  return [{ files: [TS_GLOB], languageOptions: { parser }, plugins: { sonarjs: sonarjs() }, rules }];
+  return [{ files: [TS_GLOB], languageOptions: { parser }, plugins: { sonarjs: sonarjs(o) }, rules }];
 }
 
 // Innermost function that holds the line: the latest start wins, so a head-line report maps to its own function.
@@ -55,7 +56,7 @@ export function formCheck(o: Opts, ch: Changes, files: string[]) {
   if (!o.langs.some((item) => item.adapter.id === "ts")) return check("form", []);
   const todo = files.filter((f) => ch.has(f) && /\.[cm]?[jt]sx?$/.test(f));
   if (!todo.length) return check("form", []);
-  const { Linter, parser } = loadEslint(o.repo);
+  const { Linter, parser } = loadEslint(o);
   const ctx = { o, linter: new Linter({ configType: "flat", cwd: o.repo }), config: formConfig(o, parser), ch };
   return check("form", todo.flatMap((f) => lintOne(ctx, f)));
 }
