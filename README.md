@@ -48,15 +48,15 @@ bun ~/.claude/skills/code-quality/scripts/quality.ts install-hooks <repo>
 bun ~/.claude/skills/code-quality/scripts/quality.ts --repo <repo> --update-baseline
 ```
 
-Needs [bun](https://bun.sh). Existing hooks keep working. Stop hooks: [docs/configure.md](docs/configure.md).
+Needs [bun](https://bun.sh). Existing hooks keep working. Stop hooks: [references/config.md](references/config.md).
 
 ## Docs
 
-- [Every rule, what blocks and what only notes](docs/checks.md)
-- [Languages and adapters](docs/languages.md)
-- [Configure `.quality.toml`, git hooks, Stop hooks](docs/configure.md)
-- [Jev: an optional classifier for test hunks](docs/jev.md)
-- [Evaluation: 6 sabotages, 2 real defects, 0 false blocks](docs/evaluation.md)
+- [Every rule, what blocks and what only notes](references/checks.md)
+- [Languages and adapters](references/languages.md)
+- [Configure `.quality.toml`, git hooks, Stop hooks](references/config.md)
+- [Jev: an optional classifier for test hunks](references/jev.md)
+- [Evaluation: 6 sabotages, 2 real defects, 0 false blocks](references/evaluation.md)
 - [SKILL.md](SKILL.md), the full reference the agent reads
 
 ## Credits
