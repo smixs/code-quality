@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs the hook git would have run without code-quality, with the same args and stdin, and returns
+# its exit code. core.hooksPath hides the repo's own hooks (Git LFS, husky, ...), so every wrapper
+# here ends by calling this. Where: the core.hooksPath recorded by install-hooks
+# (code-quality.previousHooksPath), else a --global or --system core.hooksPath, else
+# <git common dir>/hooks. A relative path is taken from the work tree, as git does.
+# Called as `_chain <name> args...` or through a symlink named after the hook.
+name=$(basename "$0")
+if [ "$name" = _chain ]; then name=$1; shift; fi
+dir=$(git config --local --type=path --get code-quality.previousHooksPath ||
+  git config --global --type=path --get core.hooksPath ||
+  git config --system --type=path --get core.hooksPath)
+case "$dir" in
+  "") dir=$(git rev-parse --path-format=absolute --git-common-dir)/hooks ;;
+  /*) ;;
+  *) dir=$(git rev-parse --show-toplevel)/$dir ;;
+esac
+hook=$dir/$name
+[ "$(cd "$dir" 2>/dev/null && pwd -P)" = "$(cd "$(dirname "$0")" && pwd -P)" ] && exit 0
+[ -f "$hook" ] && [ -x "$hook" ] || exit 0
+exec "$hook" "$@"

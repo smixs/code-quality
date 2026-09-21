@@ -1,0 +1,9 @@
+id: empty-catch
+language: TypeScript
+severity: error
+message: empty catch swallows the error; rethrow, return a typed failure or handle it
+rule:
+  kind: catch_clause
+  has:
+    field: body
+    regex: '^\{(\s|//[^\n]*|/\*[\s\S]*?\*/)*\}$'

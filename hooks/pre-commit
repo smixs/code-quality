@@ -1,0 +1,6 @@
+#!/bin/sh
+# code-quality pre-commit: installed per repo by `quality.ts install-hooks <repo>` (core.hooksPath).
+# Own verdict first; green = the repo's own pre-commit runs (hooks/_chain).
+here=$(dirname "$0")
+bun "$here/../scripts/quality.ts" hook pre-commit --repo "$(git rev-parse --show-toplevel)" || exit $?
+exec "$here/_chain" pre-commit "$@"

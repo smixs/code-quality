@@ -1,0 +1,4 @@
+ruleDirs:
+  - sg
+languageGlobs:
+  typescript: ["*.js", "*.mjs", "*.cjs", "*.mts", "*.cts"]

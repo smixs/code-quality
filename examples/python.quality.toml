@@ -1,0 +1,79 @@
+# code-quality config, Python. Copy to <repo>/.quality.toml, then
+#   bun ~/.claude/skills/code-quality/scripts/quality.ts install-hooks <repo>
+# Blocks: Radon CRAP, pycycle, vulture, Ruff, OSV. Install:
+#   uv tool install pycycle vulture ruff radon
+#   brew install osv-scanner
+
+[project]
+language = "py"
+src = ["src", "scripts"]
+base = "origin/main"
+# Full gate (quality.ts without a command). Must write lcov to $QG_LCOV.
+test_cmd = 'uv run --with pytest --with pytest-cov pytest -q --cov=src --cov=scripts --cov-report=lcov:"$QG_LCOV"'
+
+[thresholds]
+# One bar for every repo. Listed here so a reader sees them next to the rules.
+max_cc = 10
+max_crap = 30
+# Diagnostic warning threshold. It never changes the gate exit code.
+max_mean_crap = 5
+mean_tolerance = 0.01
+cognitive_complexity = 15
+max_depth = 4
+max_params = 4
+max_lines_per_function = 80
+dup_min_tokens = 70
+diff_coverage = 0.8
+min_release_age_days = 1
+
+[layers]
+# Application code must not import the tooling scripts.
+forbid = ["^src/:^scripts/"]
+
+[knip]
+ignore = ["tests/**", "scripts/fixtures/**"]
+
+[glossary]
+path = "CONTEXT.md"
+marker = "_Avoid_:"
+# allow = plain-line words that are still homonyms in this repo.
+allow = ["cron", "override", "job"]
+globs = ["README.md", "AGENTS.md", "CONTEXT.md", "CONTRIBUTING.md", "docs/**/*.md", "src/**/*.md"]
+commit_msg = true
+
+[docs]
+globs = ["README.md", "AGENTS.md", "CONTEXT.md", "CONTRIBUTING.md", "SECURITY.md", "docs/**/*.md"]
+# ADRs and changelogs record removals: symbols and paths they name may be gone on purpose.
+history_globs = ["docs/adr/**", "CHANGELOG.md", "**/CHANGELOG.md"]
+
+[secrets]
+allow_users = ["deploy", "ci"]
+
+[security]
+gitleaks = true
+audit = true
+
+[escalate]
+paths = ["**/*auth*", "**/*security*", "docs/adr/**"]
+
+[hooks]
+pre_push_test_cmd = "uv run --with pytest pytest -q {files}"
+pre_push_timeout = 180
+pre_push_max_tests = 40
+
+[review]
+# Jev notes on added test hunks: notes only, never block; key from OPENROUTER_API_KEY.
+jev = true
+jev_model = "typesafe/jev-1.13-20260917"
+jev_max_states = 12
+textual_test = true
+textual_test_threshold = 0.85
+error_path_tested = true
+error_path_tested_threshold = 0.5
+assertion_weakened = true
+assertion_weakened_threshold = 0.7
+mock_hides_behavior = true
+mock_hides_behavior_threshold = 0.7
+property_is_tautology = true
+property_tautology_threshold = 0.7
+llm = false

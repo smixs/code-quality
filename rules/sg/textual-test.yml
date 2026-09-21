@@ -1,0 +1,32 @@
+id: textual-test
+language: TypeScript
+severity: error
+message: test asserts on the source text of a file; assert on behaviour instead
+files:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/*.test.mts"
+  - "**/*.test.js"
+  - "**/*.test.mjs"
+rule:
+  any:
+    - pattern: assert.match($S, $$$)
+    - pattern: assert.doesNotMatch($S, $$$)
+    - pattern: assert.ok($S.includes($$$), $$$)
+    - pattern: assert.ok($S.includes($$$))
+    - pattern: assert.ok(!$S.includes($$$), $$$)
+    - pattern: assert.ok(!$S.includes($$$))
+    - pattern: expect($S).toContain($$$)
+    - pattern: expect($S).not.toContain($$$)
+    - pattern: expect($S).toMatch($$$)
+    - pattern: expect($S).not.toMatch($$$)
+  inside:
+    kind: program
+    stopBy: end
+    has:
+      stopBy: end
+      kind: variable_declarator
+      has:
+        field: name
+        pattern: $S
+      regex: 'readFileSync\([^)]*\.(ts|tsx|mts|js|mjs|cjs)\b'

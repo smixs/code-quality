@@ -1,0 +1,10 @@
+#!/bin/sh
+# code-quality pre-push: installed per repo by `quality.ts install-hooks <repo>` (core.hooksPath).
+# Both the gate and the repo's own pre-push (Git LFS uploads objects here) read the pushed refs on
+# stdin, so it is kept in a file and fed to each.
+here=$(dirname "$0")
+refs=$(mktemp) || exit 1
+trap 'rm -f "$refs"' EXIT
+cat > "$refs"
+bun "$here/../scripts/quality.ts" hook pre-push --repo "$(git rev-parse --show-toplevel)" < "$refs" || exit $?
+"$here/_chain" pre-push "$@" < "$refs"

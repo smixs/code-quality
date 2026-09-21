@@ -1,0 +1,9 @@
+id: catch-only-logs
+language: TypeScript
+severity: error
+message: catch only logs and goes on; fail fast (rethrow) or handle the error for real
+rule:
+  kind: catch_clause
+  has:
+    field: body
+    regex: '^\{\s*(//[^\n]*\s*)*(console|logger|log)\.\w+\([^;]*\);?\s*\}$'

@@ -1,0 +1,84 @@
+# code-quality config, TypeScript. Copy to <repo>/.quality.toml, then
+#   bun ~/.claude/skills/code-quality/scripts/quality.ts install-hooks <repo>
+# Every key the skill understands, with one bar for every repo (owner decision, 18.09.2026).
+
+[project]
+language = "ts"
+src = ["src", "scripts"]
+base = "origin/main"
+# Full gate (quality.ts without a command). Must write lcov to $QG_LCOV.
+test_cmd = 'node --test --test-concurrency=4 --experimental-test-coverage --test-coverage-include="src/**/*.ts" --test-coverage-include="scripts/**/*.ts" --test-coverage-exclude="**/*.test.ts" --test-coverage-exclude="scripts/fixtures/**/*.ts" --test-reporter=lcov --test-reporter-destination="$QG_LCOV" --test-reporter=spec --test-reporter-destination=stdout "src/**/*.test.ts" "scripts/**/*.test.ts"'
+
+[thresholds]
+# One bar for every repo. Listed here so a reader sees them next to the rules.
+max_cc = 10
+max_crap = 30
+# Diagnostic warning threshold. It never changes the gate exit code.
+max_mean_crap = 5
+mean_tolerance = 0.01
+cognitive_complexity = 15
+max_depth = 4
+max_params = 4
+max_lines_per_function = 80
+dup_min_tokens = 70
+diff_coverage = 0.8
+min_release_age_days = 1
+
+[layers]
+# Application code must not import the build and tooling scripts.
+forbid = ["^src/:^scripts/"]
+
+[knip]
+ignore = ["scripts/fixtures/**", "scripts/**/*.test.ts"]
+
+[glossary]
+path = "CONTEXT.md"
+marker = "_Avoid_:"
+# Lines with a qualifier are skipped by the script: they name a sense, not a word. allow = plain-line
+# words that are still homonyms in this repo (npm overrides, system cron, a schedule Job, a poller).
+allow = ["cron", "override", "job", "poller", "transport", "registry"]
+# Prose the owner and the agent write. CHANGELOG quotes history and is left out.
+globs = ["README.md", "AGENTS.md", "CONTEXT.md", "CONTRIBUTING.md", "SECURITY.md", "docs/**/*.md", "src/**/*.md"]
+commit_msg = true
+
+[docs]
+# Every backticked repo path / path:line / code symbol in these files must exist. CHANGELOG is history.
+globs = ["README.md", "AGENTS.md", "CONTEXT.md", "CONTRIBUTING.md", "SECURITY.md", "CLAUDE.md", "docs/**/*.md", "src/**/*.md"]
+# ADRs and changelogs record removals: symbols and paths they name may be gone on purpose.
+history_globs = ["docs/adr/**", "CHANGELOG.md", "**/CHANGELOG.md"]
+
+[secrets]
+# Names that are service users of a self-hosted box (systemd units, docs), not developer machines.
+allow_users = ["deploy", "ci"]
+
+[security]
+gitleaks = true
+audit = true
+
+[escalate]
+# Security-sensitive paths: always a reviewer once it is wired.
+paths = ["**/*auth*", "**/*security*", "docs/adr/**"]
+
+[hooks]
+pre_push_test_cmd = "node --test --test-concurrency=4 {files}"
+pre_push_timeout = 180
+pre_push_max_tests = 40
+
+[review]
+# Jev notes on added test hunks (SKILL.md "Jev"). Notes only, never block (owner decision 3,
+# 18.09.2026); key from OPENROUTER_API_KEY. The first two thresholds are from pilot 2. All thresholds
+# are provisional until the owner's blind labels. The LLM reviewer is not wired yet.
+jev = true
+jev_model = "typesafe/jev-1.13-20260917"
+jev_max_states = 12
+textual_test = true
+textual_test_threshold = 0.85
+error_path_tested = true
+error_path_tested_threshold = 0.5
+assertion_weakened = true
+assertion_weakened_threshold = 0.7
+mock_hides_behavior = true
+mock_hides_behavior_threshold = 0.7
+property_is_tautology = true
+property_tautology_threshold = 0.7
+llm = false

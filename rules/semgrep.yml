@@ -1,0 +1,6 @@
+rules:
+  - id: dynamic-eval
+    message: Dynamic eval or exec requires a security review
+    severity: WARNING
+    languages: [generic]
+    pattern-regex: '\b(eval|exec)\s*\('
