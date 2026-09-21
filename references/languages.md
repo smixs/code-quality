@@ -14,6 +14,9 @@ Dart is not supported by Lizard, so `crap/cc` stays `not run`. In every language
 applicable `ast-grep` rules, the secret regexes, tamper, `cov/diff`, docs and glossary also block.
 Semgrep only writes `security/semgrep` notes.
 
+The install hints below are the macOS ones; the gate prints the hint for the running platform
+(`scripts/lib/tools.ts`), and `[tools]` overrides a version or a binary path.
+
 | language | autodetect | what really blocks | `not run` and what to install |
 |---|---|---|---|
 | TypeScript/JavaScript | `package.json` | ESLint CRAP, dependency-cruiser, knip, ESLint/SonarJS, OSV | `npx`/Node.js; packages are pinned and installed into the gate cache; `brew install osv-scanner` |

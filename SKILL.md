@@ -17,7 +17,7 @@ One script, `scripts/quality.ts`, called by every entry point. Only deterministi
 | agent Stop | the agent ends a turn | `check` against `project.base`; red = one round of fixes | 10-20 s |
 | manual | before a large push, or to measure | full gate: tests with coverage, mean CRAP, worklist, hotspots | 3-6 min |
 
-CRAP needs fresh lcov (`.scratch/quality/lcov.info` with a matching fingerprint). Without it a fast entry point prints `tests: not run, no fresh lcov` and judges complexity only. A change of docs and config only (`.md`, `.toml`, `.json`, `.yml` outside `project.src`) prints `scope: docs-only` and skips the code checks.
+CRAP needs fresh lcov (`<out_dir>/lcov.info`, by default `.scratch/quality`, with a matching fingerprint). Without it a fast entry point prints `tests: not run, no fresh lcov` and judges complexity only. A change of docs and config only (`.md`, `.toml`, `.json`, `.yml` outside `project.src`) prints `scope: docs-only` and skips the code checks.
 
 ## Commands
 
@@ -36,10 +36,12 @@ bun $Q check --repo <repo> --all         # whole repo, baseline ignored: measure
 
 Flags beat `.quality.toml`: `--config`, `--baseline`, `--src a,b`, `--base <ref>`, `--test-cmd`, `--max-cc`, `--max-crap`, `--forbid from:to`, `--knip-ignore`, `--allow-red-tests`, `--no-deps`.
 
+Nothing is wired to one machine or one vendor: `[project] base` left empty is detected from `origin/HEAD`, then `origin/main`, `origin/master`, `main` (the report header says which). `[project] out_dir` moves every report, the baseline and the logs. `[tools]` overrides a pinned version or a binary path (`jscpd = "5.3.0"`, `gitleaks = "/opt/bin/gitleaks"`). `[review] jev_provider` chooses the Jev endpoint. `[security] registry_urls` points a package registry at a mirror. Every key: [references/config.md](references/config.md).
+
 ## Wire a repo
 
 1. Add `.quality.toml` to the repo root. Minimum: `[project] src` and `base`. Samples: `examples/typescript.quality.toml`, `examples/python.quality.toml`. Keys: [references/config.md](references/config.md).
-2. Add `.scratch/` to `.gitignore`; reports go there.
+2. Add `.scratch/` to `.gitignore`; reports go there (`[project] out_dir` moves them).
 3. `bun $Q --repo <repo> --update-baseline`. The baseline lives in the main checkout, shared by worktrees. Without it the gate compares against `project.base` and says so. Run it again after updating the skill.
 4. `bun $Q install-hooks <repo>`. Existing hooks (husky, Git LFS) are chained, see [references/hook-chain.md](references/hook-chain.md).
 5. Optional: Stop hooks for Claude Code, Codex and pi, [adapters/ENABLE.md](adapters/ENABLE.md).
@@ -81,14 +83,14 @@ Full rule table with how each one works: [references/checks.md](references/check
 
 Every bypass needs a reason and leaves a `note: bypass <rule> <source> <reason>` line in the report.
 
-- Deleting a test block: `qg:test-removed <reason>` in the commit message (or in `.scratch/quality/allow.md` for `check --staged` and Stop).
+- Deleting a test block: `qg:test-removed <reason>` in the commit message (or in `<out_dir>/allow.md` for `check --staged` and Stop).
 - `pre-push` with no test found: `qg:no-test <reason>` in a pushed commit message.
 - A deliberate secret in a fixture: `qg:allow <reason>` or `gitleaks:allow <reason>` on the line.
 - Changing `src`, thresholds, `[security]`, `[hooks]`, `[review]`, `[knip]`, `[layers]`, `[docs]`, `[glossary] allow` together with source code is blocked; change them in a separate commit.
 
 ## Jev
 
-An optional classifier for added test hunks: five yes/no questions with a calibrated probability, notes only, `[review] jev = true` and `OPENROUTER_API_KEY`. Details: [references/jev.md](references/jev.md).
+An optional classifier for added test hunks: five yes/no questions with a calibrated probability, notes only, `[review] jev = true` plus a key: `TYPESAFE_API_KEY` for the TypeSafe API or `OPENROUTER_API_KEY` for OpenRouter, picked by `[review] jev_provider` (default `auto`). Details: [references/jev.md](references/jev.md).
 
 ## Common mistakes
 

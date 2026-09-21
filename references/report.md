@@ -1,6 +1,6 @@
 # Report
 
-`<repo>/.scratch/quality/report.md` (full gate) or `check.md` (`check` and the hooks), next to a `.json`
+`<repo>/<out_dir>/report.md` (`out_dir` is `.scratch/quality` unless `[project] out_dir` says otherwise, full gate) or `check.md` (`check` and the hooks), next to a `.json`
 with every finding and tamper/cov note. The `Bypasses` section keeps the accepted bypasses with their
 source and reason. The other sections: Gate (per rule), Escalate, Drift (unchanged functions worse
 than the baseline, not gated), Summary, Worklist (CRAP × commits in 12 months, `tests` / `split` /

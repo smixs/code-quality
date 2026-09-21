@@ -5,7 +5,13 @@
 [project]
 language = "ts"
 src = ["src", "scripts"]
+# Leave base out to detect it from origin/HEAD (then origin/main, origin/master, main); the report
+# header marks a detected base.
 base = "origin/main"
+# Where every report, the baseline, allow.md and the logs go. Default .scratch/quality.
+# out_dir = ".scratch/quality"
+# Cache for the npm tools the gate installs itself. QG_TOOLS wins over it.
+# tools_dir = "~/.cache/quality-gate"
 # Full gate (quality.ts without a command). Must write lcov to $QG_LCOV.
 test_cmd = 'node --test --test-concurrency=4 --experimental-test-coverage --test-coverage-include="src/**/*.ts" --test-coverage-include="scripts/**/*.ts" --test-coverage-exclude="**/*.test.ts" --test-coverage-exclude="scripts/fixtures/**/*.ts" --test-reporter=lcov --test-reporter-destination="$QG_LCOV" --test-reporter=spec --test-reporter-destination=stdout "src/**/*.test.ts" "scripts/**/*.test.ts"'
 
@@ -54,6 +60,9 @@ allow_users = ["deploy", "ci"]
 [security]
 gitleaks = true
 audit = true
+# Registry per ecosystem for deps/lock-age: point one at a mirror, or "" to skip that ecosystem.
+# Known ids: npm, pypi, crates, go, rubygems, packagist, pub, nuget, maven, deps.dev.
+# registry_urls = { npm = "https://mirror.local/npm/{name}" }
 
 [escalate]
 # Security-sensitive paths: always a reviewer once it is wired.
@@ -64,12 +73,25 @@ pre_push_test_cmd = "node --test --test-concurrency=4 {files}"
 pre_push_timeout = 180
 pre_push_max_tests = 40
 
+[tools]
+# Overrides for the pinned external tools (ids in scripts/lib/tools.ts). A bare value is a version,
+# a value with a path separator a binary path. Unknown ids are a config error.
+# jscpd = "5.3.0"
+# gitleaks = "/opt/bin/gitleaks"
+
 [review]
 # Jev notes on added test hunks (SKILL.md "Jev"). Notes only, never block (owner decision 3,
-# 18.09.2026); key from OPENROUTER_API_KEY. The first two thresholds are from pilot 2. All thresholds
-# are provisional until the owner's blind labels. The LLM reviewer is not wired yet.
+# 18.09.2026). The first two thresholds are from pilot 2. All thresholds are provisional until the
+# owner's blind labels. The LLM reviewer is not wired yet.
 jev = true
-jev_model = "typesafe/jev-1.13-20260917"
+# auto = TypeSafe when TYPESAFE_API_KEY is set, else OpenRouter when OPENROUTER_API_KEY is set.
+# typesafe -> https://api.typesafe.ai/v1/systemone, TYPESAFE_API_KEY, model jev-1.13.0
+# openrouter -> https://openrouter.ai/api/alpha/decisions, OPENROUTER_API_KEY, model typesafe/jev-1.13-20260917
+# custom -> jev_url, jev_key_env and jev_model are all required.
+jev_provider = "auto"
+# jev_url = "https://api.typesafe.ai/v1/systemone"
+# jev_key_env = "TYPESAFE_API_KEY"
+# jev_model = "jev-1.13.0"
 jev_max_states = 12
 textual_test = true
 textual_test_threshold = 0.85

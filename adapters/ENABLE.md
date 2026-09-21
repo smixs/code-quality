@@ -10,13 +10,13 @@ code.claude.com/docs/en/hooks and learn.chatgpt.com/docs/hooks on 18.09.2026):
 - input: `{"cwd": "...", "session_id": "...", ...}`; no JSON on stdin = error on stderr and exit 1
   (not 2: in Claude Code exit 2 means "block", and a broken call would lock the agent in);
 - the session touched nothing (`[project] src` paths clean in `git status` and HEAD unchanged since the
-  last Stop of this session, `.scratch/quality/stop-heads.json`): `{}` right away, the gate does not
+  last Stop of this session, `<out_dir>/stop-heads.json`, `out_dir` default `.scratch/quality`): `{}` right away, the gate does not
   run. The first Stop of a session on a clean tree only remembers HEAD: commits before it passed
   pre-commit;
 - gate green or repo not wired: `{}`, the agent finishes;
 - gate red: `{"decision": "block", "reason": "<verdict and report path>"}`, the agent keeps going and fixes it;
 - the same red verdict in the same session a second time: `{"systemMessage": "..."}` with no block. One
-  round of fixes per new red verdict. The script counts rounds itself (`.scratch/quality/stop-block.json`)
+  round of fixes per new red verdict. The script counts rounds itself (`<out_dir>/stop-block.json`)
   instead of using `stop_hook_active`: that flag is true when another Stop hook blocked too, and the
   gate would stay silent. The key of "the same verdict" is the session id plus the deterministic red
   lines only (`GATE FAIL ...` and findings). `note: jev ...`, `jev: not available (...)`, the tests line

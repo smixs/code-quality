@@ -7,7 +7,10 @@
 [project]
 language = "py"
 src = ["src", "scripts"]
+# Leave base out to detect it from origin/HEAD (then origin/main, origin/master, main).
 base = "origin/main"
+# out_dir = ".scratch/quality"   # every report, the baseline, allow.md and the logs
+# tools_dir = "~/.cache/quality-gate"
 # Full gate (quality.ts without a command). Must write lcov to $QG_LCOV.
 test_cmd = 'uv run --with pytest --with pytest-cov pytest -q --cov=src --cov=scripts --cov-report=lcov:"$QG_LCOV"'
 
@@ -52,6 +55,9 @@ allow_users = ["deploy", "ci"]
 [security]
 gitleaks = true
 audit = true
+# Registry per ecosystem for deps/lock-age: point one at a mirror, or "" to skip that ecosystem.
+# Known ids: npm, pypi, crates, go, rubygems, packagist, pub, nuget, maven, deps.dev.
+# registry_urls = { npm = "https://mirror.local/npm/{name}" }
 
 [escalate]
 paths = ["**/*auth*", "**/*security*", "docs/adr/**"]
@@ -61,10 +67,18 @@ pre_push_test_cmd = "uv run --with pytest pytest -q {files}"
 pre_push_timeout = 180
 pre_push_max_tests = 40
 
+[tools]
+# Overrides for the pinned external tools (ids in scripts/lib/tools.ts). A bare value is a version,
+# a value with a path separator a binary path. Unknown ids are a config error.
+# jscpd = "5.3.0"
+# gitleaks = "/opt/bin/gitleaks"
+
 [review]
-# Jev notes on added test hunks: notes only, never block; key from OPENROUTER_API_KEY.
+# Jev notes on added test hunks: notes only, never block. The key comes from the provider:
+# auto takes TYPESAFE_API_KEY, else OPENROUTER_API_KEY.
 jev = true
-jev_model = "typesafe/jev-1.13-20260917"
+jev_provider = "auto"
+# jev_url / jev_key_env / jev_model override the provider defaults (required for jev_provider = "custom").
 jev_max_states = 12
 textual_test = true
 textual_test_threshold = 0.85

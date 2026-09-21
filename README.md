@@ -14,7 +14,7 @@ A quality gate for coding agents: git hooks and Stop hooks that block test tampe
 <p>
   <a href="https://skills.sh/smixs/code-quality-skill"><img src="https://skills.sh/b/smixs/code-quality-skill?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
-  <a href="scripts/"><img src="https://img.shields.io/badge/tests-126_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="126 tests"></a>
+  <a href="scripts/"><img src="https://img.shields.io/badge/tests-166_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="166 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
   <a href="adapters/ENABLE.md"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
   <a href="adapters/ENABLE.md"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
@@ -92,6 +92,25 @@ bun ~/.claude/skills/code-quality/scripts/quality.ts --repo <repo> --update-base
 ```
 
 Existing hooks keep working. Stop hooks for the agents: [references/config.md](references/config.md).
+
+## Jev, optional
+
+Five calibrated yes/no questions about added test hunks (a textual test, an untested error path, a
+weakened assertion, a mock that hides the change, a tautological property). Notes only: Jev never
+changes the exit code. Two ways to connect, whichever key you have:
+
+```toml
+[review]                      # TypeSafe directly, key from console.typesafe.ai/keys
+jev = true                    # TYPESAFE_API_KEY in the environment
+```
+
+```toml
+[review]                      # or through OpenRouter
+jev = true                    # OPENROUTER_API_KEY in the environment
+jev_provider = "openrouter"
+```
+
+Details, the model pins and the curl for each: [references/jev.md](references/jev.md).
 
 ## Docs
 
