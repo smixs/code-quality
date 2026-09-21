@@ -25,6 +25,7 @@ afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })))
 
 const sh = (cwd: string, cmd: string) => spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8" });
 const noGlossary = { toml: DEFAULTS } as never;
+const KEY_ENV = { OPENROUTER_API_KEY: "k" };
 
 describe("parseDiff", () => {
   test("numbers added lines from the hunk start", () => {
@@ -184,12 +185,12 @@ describe("agent-stop", () => {
       throw new Error("timeout");
     };
     const answer: Post = async () => ({ status: 200, text: JSON.stringify({ answers: { textual_test: { type: "noul", noul: 0.9 }, error_path_tested: { type: "noul", noul: 0.1 } } }) });
-    const first = await runCheck(o, { key: "k", post: timeout });
-    const second = await runCheck(o, { key: "k", post: answer });
+    const first = await runCheck(o, { env: KEY_ENV, post: timeout });
+    const second = await runCheck(o, { env: KEY_ENV, post: answer });
     expect([first.ok, first.text === second.text]).toEqual([false, false]);
     expect([redAnswer(repo, "s", first), redAnswer(repo, "s", second)].map((r) => Object.keys(r)[0])).toEqual(["decision", "systemMessage"]);
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs(14)}\n  return -1;\n}\n`);
-    expect(redAnswer(repo, "s", await runCheck(o, { key: "k", post: answer }))).toHaveProperty("decision", "block");
+    expect(redAnswer(repo, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toHaveProperty("decision", "block");
   }, 120_000);
   test("stdin that is not JSON is an error (exit 1), not an allow", () => {
     const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: "garbage", encoding: "utf8" });
@@ -480,7 +481,7 @@ describe("jev notes", () => {
     sh(repo, "git add -A");
     return buildOpts(readArgs(["--repo", repo, "--staged", "--no-deps"]));
   };
-  const answering = (textual: number, errorPath: number, bodies: unknown[] = []): Post => async (_key, body) => {
+  const answering = (textual: number, errorPath: number, bodies: unknown[] = []): Post => async (_target, body) => {
     bodies.push(body);
     return { status: 200, text: JSON.stringify({ answers: { textual_test: { type: "noul", noul: textual }, error_path_tested: { type: "noul", noul: errorPath } } }) };
   };
@@ -525,7 +526,7 @@ describe("jev notes", () => {
     sh(repo, "git add -A");
     return buildOpts(readArgs(["--repo", repo, "--staged", "--no-deps"]));
   };
-  const answerQuestion = (id: NewQuestion["id"], p: number, bodies: unknown[] = []): Post => async (_key, body) => {
+  const answerQuestion = (id: NewQuestion["id"], p: number, bodies: unknown[] = []): Post => async (_target, body) => {
     bodies.push(body);
     return { status: 200, text: JSON.stringify({ answers: { [id]: { type: "noul", noul: p } } }) };
   };
@@ -533,19 +534,19 @@ describe("jev notes", () => {
   test("textual_test at or above 0.85 and error_path_tested below 0.5 are notes; both questions go in one request; verdicts are logged", async () => {
     const o = jevRepo();
     const bodies: unknown[] = [];
-    const lines = await jevNotes(o, changes(o), { key: "k", post: answering(0.93, 0.2, bodies) });
+    const lines = await jevNotes(o, changes(o), { env: KEY_ENV, post: answering(0.93, 0.2, bodies) });
     expect(lines.filter((l) => l.startsWith("note: jev")).map((l) => l.split(" ")[2])).toEqual(["textual_test", "error_path_tested"]);
     expect(bodies.map((b) => Object.keys((b as { questions: object }).questions))).toEqual([["textual_test", "error_path_tested"]]);
     const log = readFileSync(join(o.repo, ".scratch/quality/jev-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     expect(log.map((r) => [r.question, r.p, r.file])).toEqual([["textual_test", 0.93, "src/a.test.ts"], ["error_path_tested", 0.2, "src/a.test.ts"]]);
-    const quiet = await jevNotes(o, changes(o), { key: "k", post: answering(0.84, 0.5) });
+    const quiet = await jevNotes(o, changes(o), { env: KEY_ENV, post: answering(0.84, 0.5) });
     expect(quiet.filter((l) => l.startsWith("note:"))).toEqual([]);
   }, 60_000);
 
   test("a missing key is one 'not available' line and no request", async () => {
     const o = jevRepo();
     const bodies: unknown[] = [];
-    expect(await jevNotes(o, changes(o), { key: "", post: answering(1, 0, bodies) })).toEqual(["jev: not available (OPENROUTER_API_KEY is not set)"]);
+    expect(await jevNotes(o, changes(o), { env: {}, post: answering(1, 0, bodies) })).toEqual(["jev: not available (no TYPESAFE_API_KEY or OPENROUTER_API_KEY)"]);
     expect(bodies).toEqual([]);
   }, 60_000);
 
@@ -554,17 +555,17 @@ describe("jev notes", () => {
     const broken: Post = async () => {
       throw new Error("connection refused");
     };
-    const r = await runCheck(o, { key: "k", post: broken });
-    expect([r.ok, r.text.split("\n").filter((l) => l.startsWith("jev: not available"))]).toEqual([true, ["jev: not available (1 of 1 request(s): connection refused)"]]);
+    const r = await runCheck(o, { env: KEY_ENV, post: broken });
+    expect([r.ok, r.text.split("\n").filter((l) => l.startsWith("jev: not available"))]).toEqual([true, ["jev: not available (connection refused)"]]);
     const http500: Post = async () => ({ status: 500, text: "upstream" });
-    expect((await runCheck(o, { key: "k", post: http500 })).ok).toBe(true);
+    expect((await runCheck(o, { env: KEY_ENV, post: http500 })).ok).toBe(true);
   }, 120_000);
 
   for (const q of newQuestions) {
     test(`${q.id}: p at the threshold creates a note with the question's minimal state`, async () => {
       const o = questionRepo(q);
       const bodies: unknown[] = [];
-      const lines = await jevNotes(o, changes(o), { key: "k", post: answerQuestion(q.id, 0.7, bodies) });
+      const lines = await jevNotes(o, changes(o), { env: KEY_ENV, post: answerQuestion(q.id, 0.7, bodies) });
       expect(lines.filter((l) => l.startsWith("note: jev")).map((l) => l.split(" ")[2])).toEqual([q.id]);
       const body = bodies[0] as { questions: object; state: Record<string, unknown> };
       expect([bodies.length, Object.keys(body.questions), Object.keys(body.state).sort()]).toEqual([1, [q.id], q.stateFields.toSorted()]);
@@ -574,7 +575,7 @@ describe("jev notes", () => {
 
     test(`${q.id}: p below the threshold is logged but creates no note`, async () => {
       const o = questionRepo(q);
-      const lines = await jevNotes(o, changes(o), { key: "k", post: answerQuestion(q.id, 0.69) });
+      const lines = await jevNotes(o, changes(o), { env: KEY_ENV, post: answerQuestion(q.id, 0.69) });
       expect(lines.filter((l) => l.startsWith("note: jev"))).toEqual([]);
       const log = readFileSync(join(o.repo, ".scratch/quality/jev-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
       expect(log.map((r) => [r.question, r.p, r.noted])).toEqual([[q.id, 0.69, false]]);
@@ -590,7 +591,7 @@ describe("jev notes", () => {
     };
     const o = questionRepo(q);
     const bodies: unknown[] = [];
-    await jevNotes(o, changes(o), { key: "k", post: answerQuestion(q.id, 0.2, bodies) });
+    await jevNotes(o, changes(o), { env: KEY_ENV, post: answerQuestion(q.id, 0.2, bodies) });
     expect(bodies.map((body) => Object.keys((body as { questions: object }).questions))).toEqual([["mock_hides_behavior"]]);
   }, 60_000);
 
@@ -605,11 +606,11 @@ describe("jev notes", () => {
     o.toml.review.mock_hides_behavior = true;
     o.toml.review.property_is_tautology = true;
     const bodies: unknown[] = [];
-    const post: Post = async (_key, body) => {
+    const post: Post = async (_target, body) => {
       bodies.push(body);
       return { status: 200, text: JSON.stringify({ answers: Object.fromEntries(newQuestions.map((x) => [x.id, { type: "noul", noul: 0.1 }])) }) };
     };
-    await jevNotes(o, changes(o), { key: "k", post });
+    await jevNotes(o, changes(o), { env: KEY_ENV, post });
     expect(bodies.map((body) => Object.keys((body as { questions: object }).questions))).toEqual([newQuestions.map((x) => x.id)]);
   }, 60_000);
 });

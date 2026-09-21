@@ -1,6 +1,7 @@
-// Jev review notes: five Noul questions on added test hunks, asked through OpenRouter. Notes only:
-// nothing here can change the verdict (owner decision 3). Any failure is one
-// "jev: not available (<reason>)" line, never a silent pass. Every verdict goes to jev-log.jsonl.
+// Jev review notes: five Noul questions on added test hunks, asked through a Jev provider (TypeSafe
+// direct, OpenRouter, or a custom endpoint with the same contract). Notes only: nothing here can
+// change the verdict (owner decision 3). Any failure is one "jev: not available (<reason>)" line,
+// never a silent pass. Every verdict goes to jev-log.jsonl.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";
@@ -9,7 +10,6 @@ import { adapterForFile, isTestFile, matchesTestPattern } from "./lang.ts";
 import { localStubShadows } from "./tamper.ts";
 import { git, mainCheckout, run } from "./util.ts";
 
-export const JEV_URL = "https://openrouter.ai/api/alpha/decisions";
 const TIMEOUT_MS = 5000;
 // The pilot's conservative approximation for Jev's 32k-token state limit. This budget is shared by
 // all text fields in one state, so adding questions cannot multiply the state size.
@@ -123,17 +123,72 @@ export const QUESTIONS: QDef[] = [
 
 export type Hunk = { file: string; at: string; text: string };
 type Reply = { status: number; text: string };
-export type Post = (key: string, body: unknown, signal: AbortSignal) => Promise<Reply>;
-export type JevDeps = { key: string; post: Post };
+export type Post = (target: Target, body: unknown, signal: AbortSignal) => Promise<Reply>;
+export type JevDeps = { env: NodeJS.ProcessEnv; post: Post };
 type Req = { hunk: Hunk; qs: QDef[]; body: unknown };
 
-export const openrouterPost: Post = async (key, body, signal) => {
-  const headers = { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "code-quality" };
-  const res = await fetch(JEV_URL, { method: "POST", headers, body: JSON.stringify(body), signal });
+// ---- provider: where the questions are asked, which key opens it, which model answers
+
+export type ProviderId = "typesafe" | "openrouter" | "custom";
+export type Target = { provider: ProviderId; url: string; keyEnv: string; model: string; key: string };
+
+// docs.typesafe.ai/api (21.09.2026): POST <url>, Bearer key, body {state, model, questions}. The
+// OpenRouter Decisions endpoint takes the same body; only the model id and the X-Title header differ.
+// The model ids are pinned: the thresholds were tuned on 1.13, and the aliases (jev-latest,
+// jev-preview) move with every release.
+export const PROVIDERS = {
+  typesafe: { url: "https://api.typesafe.ai/v1/systemone", keyEnv: "TYPESAFE_API_KEY", model: "jev-1.13.0" },
+  openrouter: { url: "https://openrouter.ai/api/alpha/decisions", keyEnv: "OPENROUTER_API_KEY", model: "typesafe/jev-1.13-20260917" },
+} as const;
+
+type Review = Record<string, string | number | boolean>;
+const str = (r: Review, key: string) => String(r[key] ?? "").trim();
+
+function autoProvider(env: NodeJS.ProcessEnv): "typesafe" | "openrouter" {
+  if (env[PROVIDERS.typesafe.keyEnv]) return "typesafe";
+  if (env[PROVIDERS.openrouter.keyEnv]) return "openrouter";
+  throw new Error(`no ${PROVIDERS.typesafe.keyEnv} or ${PROVIDERS.openrouter.keyEnv}`);
+}
+
+function providerOf(r: Review, env: NodeJS.ProcessEnv): ProviderId {
+  const id = str(r, "jev_provider") || "auto";
+  if (id === "auto") return autoProvider(env);
+  if (id === "typesafe" || id === "openrouter" || id === "custom") return id;
+  throw new Error(`unknown review.jev_provider ${id}; expected auto | typesafe | openrouter | custom`);
+}
+
+function customTarget(r: Review): Omit<Target, "key"> {
+  const missing = ["jev_url", "jev_key_env", "jev_model"].filter((key) => !str(r, key));
+  if (missing.length) throw new Error(`review.jev_provider = custom needs ${missing.map((key) => `review.${key}`).join(", ")}`);
+  return { provider: "custom", url: str(r, "jev_url"), keyEnv: str(r, "jev_key_env"), model: str(r, "jev_model") };
+}
+
+function knownTarget(provider: "typesafe" | "openrouter", r: Review): Omit<Target, "key"> {
+  const d = PROVIDERS[provider];
+  return { provider, url: str(r, "jev_url") || d.url, keyEnv: str(r, "jev_key_env") || d.keyEnv, model: str(r, "jev_model") || d.model };
+}
+
+// The reason is the text of "jev: not available (<reason>)": a missing key is never a silent pass.
+export function jevTarget(r: Review, env: NodeJS.ProcessEnv): Target {
+  const provider = providerOf(r, env);
+  const base = provider === "custom" ? customTarget(r) : knownTarget(provider, r);
+  const key = env[base.keyEnv] ?? "";
+  if (!key) throw new Error(`${base.keyEnv} is not set`);
+  return { ...base, key };
+}
+
+export function jevHeaders(target: Target): Record<string, string> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${target.key}`, "Content-Type": "application/json" };
+  if (target.provider === "openrouter") headers["X-Title"] = "code-quality";
+  return headers;
+}
+
+export const postWith = (fetchImpl: typeof fetch): Post => async (target, body, signal) => {
+  const res = await fetchImpl(target.url, { method: "POST", headers: jevHeaders(target), body: JSON.stringify(body), signal });
   return { status: res.status, text: await res.text() };
 };
 
-export const defaultJev = (): JevDeps => ({ key: process.env.OPENROUTER_API_KEY ?? "", post: openrouterPost });
+export const defaultJev = (): JevDeps => ({ env: process.env, post: postWith(fetch) });
 
 // ---- hunks: added test hunks with 3 lines of context, like the pilot's items
 
@@ -189,8 +244,6 @@ export const codeAddsErrors = (o: Opts, ch: Changes) => addedLines(ch, (file) =>
 
 // ---- requests: all applicable questions of one hunk in one request; state has only fields they read
 
-type Review = Record<string, string | number | boolean>;
-
 function enabledQs(r: Review, h: Hunk, context: QContext) {
   return QUESTIONS.filter((q) => r[q.id] === true && (!q.applies || q.applies(h, context)));
 }
@@ -234,13 +287,15 @@ function requestOf(model: string, h: Hunk, qs: QDef[], changedSourceFiles: strin
 
 // ---- asking and reading the answers
 
-type Verdict = { q: QDef; hunk: Hunk; p: number };
+type Verdict = { q: QDef; hunk: Hunk; p: number; model: string };
 
-async function ask(d: JevDeps, r: Req, signal: AbortSignal): Promise<Verdict[]> {
-  const res = await d.post(d.key, r.body, signal);
-  if (res.status !== 200) throw new Error(`HTTP ${res.status}: ${res.text.slice(0, 160)}`);
-  const answers = JSON.parse(res.text).answers;
-  return r.qs.map((q) => ({ q, hunk: r.hunk, p: noulOf(answers, q.id) }));
+// The provider answers with the versioned model id: that is what the log records, not the request's.
+async function ask(d: JevDeps, target: Target, r: Req, signal: AbortSignal): Promise<Verdict[]> {
+  const res = await d.post(target, r.body, signal);
+  if (res.status !== 200) throw new Error(`${target.provider} ${res.status}`);
+  const answer = JSON.parse(res.text);
+  const model = typeof answer.model === "string" && answer.model ? answer.model : target.model;
+  return r.qs.map((q) => ({ q, hunk: r.hunk, p: noulOf(answer.answers, q.id), model }));
 }
 
 function noulOf(answers: Record<string, { noul?: unknown }> | undefined, id: string) {
@@ -271,32 +326,38 @@ function logVerdicts(o: Opts, vs: Verdict[], r: Review) {
   mkdirSync(dir, { recursive: true });
   const sha = run("git", ["rev-parse", "--short", "HEAD"], o.repo).out.trim();
   const ts = new Date().toISOString();
-  const rows = vs.map((v) => JSON.stringify({ ts, question: v.q.id, p: v.p, file: v.hunk.file, hunk: v.hunk.at, sha, scope: o.scope.kind, model: r.jev_model, noted: noted(v, r) }));
+  const rows = vs.map((v) => JSON.stringify({ ts, question: v.q.id, p: v.p, file: v.hunk.file, hunk: v.hunk.at, sha, scope: o.scope.kind, model: v.model, noted: noted(v, r) }));
   if (rows.length) appendFileSync(join(dir, "jev-log.jsonl"), `${rows.join("\n")}\n`);
 }
 
+// Every request failing the same way is one reason (a 401 key, a 429 wall); a partial failure says how many.
 function failLine(failed: string[], total: number) {
   if (!failed.length) return [];
-  return [`jev: not available (${failed.length} of ${total} request(s): ${failed[0]})`];
+  const same = failed.length === total && failed.every((reason) => reason === failed[0]);
+  return [`jev: not available (${same ? failed[0] : `${failed.length} of ${total} request(s): ${failed[0]}`})`];
 }
 
-async function askAll(o: Opts, d: JevDeps, reqs: Req[], r: Review) {
+type AskCtx = { o: Opts; d: JevDeps; target: Target; r: Review };
+
+async function askAll(ctx: AskCtx, reqs: Req[]) {
+  const { o, d, target, r } = ctx;
   const signal = AbortSignal.timeout(TIMEOUT_MS);
-  const settled = await Promise.allSettled(reqs.map((x) => ask(d, x, signal)));
+  const settled = await Promise.allSettled(reqs.map((x) => ask(d, target, x, signal)));
   const vs = settled.flatMap((s) => (s.status === "fulfilled" ? s.value : []));
   const failed = settled.flatMap((s) => (s.status === "rejected" ? [reasonOf(s.reason)] : []));
   logVerdicts(o, vs, r);
   const notes = vs.filter((v) => noted(v, r)).map((v) => noteLine(v, r));
-  return [...notes, ...failLine(failed, reqs.length), `jev: ${reqs.length - failed.length} of ${reqs.length} hunk(s) answered, ${notes.length} note(s), ${r.jev_model}`];
+  const model = vs[0]?.model ?? target.model;
+  return [...notes, ...failLine(failed, reqs.length), `jev: ${reqs.length - failed.length} of ${reqs.length} hunk(s) answered, ${notes.length} note(s), ${target.provider} ${model}`];
 }
 
-function requests(o: Opts, ch: Changes, r: Review) {
+function requests(o: Opts, ch: Changes, r: Review, model: string) {
   const hunks = testHunks(o, ch);
   const context = { errorsAdded: codeAddsErrors(o, ch), localStub: (h: Hunk) => hasMock(o, ch, h) };
   const changedSourceFiles = sourceFiles(o, ch);
   const reqs = hunks.flatMap((h) => {
     const qs = enabledQs(r, h, context);
-    return qs.length ? [requestOf(String(r.jev_model), h, qs, changedSourceFiles)] : [];
+    return qs.length ? [requestOf(model, h, qs, changedSourceFiles)] : [];
   });
   return { reqs: reqs.slice(0, Number(r.jev_max_states)), total: reqs.length };
 }
@@ -312,12 +373,12 @@ function addedForStub(h: Hunk) {
 }
 
 async function jevLines(o: Opts, ch: Changes, d: JevDeps) {
-  if (!d.key) return ["jev: not available (OPENROUTER_API_KEY is not set)"];
   const r = o.toml.review as Review;
-  const { reqs, total } = requests(o, ch, r);
+  const target = jevTarget(r, d.env);
+  const { reqs, total } = requests(o, ch, r, target.model);
   if (!reqs.length) return ["jev: nothing to ask (no added test hunks)"];
   const capped = total > reqs.length ? [`jev: asked ${reqs.length} of ${total} test hunks (jev_max_states)`] : [];
-  return [...capped, ...(await askAll(o, d, reqs, r))];
+  return [...capped, ...(await askAll({ o, d, target, r }, reqs))];
 }
 
 // Boundary: whatever breaks inside (git, the log file, the answer) becomes one line, never a throw.

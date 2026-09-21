@@ -35,7 +35,11 @@ export const DEFAULTS = {
   review: {
     jev: false,
     llm: false,
-    jev_model: "typesafe/jev-1.13-20260917",
+    // Provider, endpoint, key variable and model: empty = the default of the resolved provider (jev.ts).
+    jev_provider: "auto",
+    jev_url: "",
+    jev_key_env: "",
+    jev_model: "",
     jev_max_states: 12,
     textual_test: true,
     textual_test_threshold: 0.85,
