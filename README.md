@@ -12,6 +12,7 @@
 A quality gate for coding agents: git hooks and Stop hooks that block test tampering and hold one complexity bar on every changed function. 12 languages, one config file, no server.
 
 <p>
+  <a href="https://skills.sh/smixs/code-quality-skill"><img src="https://skills.sh/b/smixs/code-quality-skill?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
   <a href="scripts/"><img src="https://img.shields.io/badge/tests-126_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="126 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
@@ -70,13 +71,27 @@ flowchart LR
 
 ## Install
 
+Through the [skills.sh](https://skills.sh/smixs/code-quality-skill) CLI, into Claude Code, Codex, Cursor and 40 other agents:
+
+```bash
+npx skills add smixs/code-quality-skill -g          # asks which agents; -g = for all your projects
+npx skills add smixs/code-quality-skill -g -a claude-code -y   # non-interactive
+```
+
+Or by hand:
+
 ```bash
 git clone https://github.com/smixs/code-quality-skill ~/.claude/skills/code-quality
+```
+
+Then wire a repo (needs [bun](https://bun.sh)):
+
+```bash
 bun ~/.claude/skills/code-quality/scripts/quality.ts install-hooks <repo>
 bun ~/.claude/skills/code-quality/scripts/quality.ts --repo <repo> --update-baseline
 ```
 
-Needs [bun](https://bun.sh). Existing hooks keep working. Stop hooks: [references/config.md](references/config.md).
+Existing hooks keep working. Stop hooks for the agents: [references/config.md](references/config.md).
 
 ## Docs
 
