@@ -1,14 +1,43 @@
-![Code Quality Skill: a quality gate for AI coding agents, red barrier down, green barrier up](assets/hero.webp)
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <img src="assets/logo-light.svg" width="440" alt="Code Quality">
+</picture>
 
 # Code Quality Skill
 
 **Your AI agent made the tests green. Did it fix the code, or the tests?**
 
-A quality gate for coding agents. It runs from git hooks and from the Stop hooks of Claude Code, Codex and pi, blocks test tampering, and holds one complexity bar on every changed function. 12 languages, one config file, no server.
+A quality gate for coding agents: git hooks and Stop hooks that block test tampering and hold one complexity bar on every changed function. 12 languages, one config file, no server.
 
-[![Claude Skill](https://img.shields.io/badge/Claude-Skill-blueviolet?style=flat-square)](https://docs.claude.com/en/docs/agents/agent-skills)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-126_passing-brightgreen?style=flat-square)](scripts/)
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
+  <a href="scripts/"><img src="https://img.shields.io/badge/tests-126_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="126 tests"></a>
+  <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
+  <a href="adapters/ENABLE.md"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
+  <a href="adapters/ENABLE.md"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
+  <a href="references/jev.md"><img src="https://img.shields.io/badge/Jev-TypeSafe_%7C_OpenRouter-0ea5e9?style=flat-square" alt="Jev"></a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust">
+  <img src="https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white" alt="Java">
+  <img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin">
+  <img src="https://img.shields.io/badge/C%23-512BD4?style=flat-square&logo=dotnet&logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Swift-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift">
+  <img src="https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white" alt="PHP">
+  <img src="https://img.shields.io/badge/Ruby-CC342D?style=flat-square&logo=ruby&logoColor=white" alt="Ruby">
+  <img src="https://img.shields.io/badge/C%2B%2B-00599C?style=flat-square&logo=cplusplus&logoColor=white" alt="C++">
+  <img src="https://img.shields.io/badge/Dart-0175C2?style=flat-square&logo=dart&logoColor=white" alt="Dart">
+</p>
+
+</div>
+
+![Two toll lanes: red barrier down, green barrier up](assets/hero.webp)
 
 ## The cheap way out, caught
 
