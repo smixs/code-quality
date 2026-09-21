@@ -1,10 +1,10 @@
+![Code Quality Skill: a quality gate for AI coding agents, red barrier down, green barrier up](assets/hero.webp)
+
 # Code Quality Skill
 
 **Your AI agent made the tests green. Did it fix the code, or the tests?**
 
 A quality gate for coding agents. It runs from git hooks and from the Stop hooks of Claude Code, Codex and pi, blocks test tampering, and holds one complexity bar on every changed function. 12 languages, one config file, no server.
-
-![Code Quality Skill: a quality gate for AI coding agents, red barrier down, green barrier up](assets/hero.webp)
 
 [![Claude Skill](https://img.shields.io/badge/Claude-Skill-blueviolet?style=flat-square)](https://docs.claude.com/en/docs/agents/agent-skills)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
