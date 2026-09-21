@@ -181,6 +181,7 @@ describe("agent-stop", () => {
     writeFileSync(join(repo, "src/a.test.ts"), 'import { test } from "node:test";\ntest("t", () => {});\n');
     sh(repo, "git add -A");
     const o = buildOpts(readArgs(["--repo", repo, "--no-deps"]));
+    const stopState = { repo, outDir: o.outDir };
     const timeout: Post = async () => {
       throw new Error("timeout");
     };
@@ -188,9 +189,9 @@ describe("agent-stop", () => {
     const first = await runCheck(o, { env: KEY_ENV, post: timeout });
     const second = await runCheck(o, { env: KEY_ENV, post: answer });
     expect([first.ok, first.text === second.text]).toEqual([false, false]);
-    expect([redAnswer(repo, "s", first), redAnswer(repo, "s", second)].map((r) => Object.keys(r)[0])).toEqual(["decision", "systemMessage"]);
+    expect([redAnswer(stopState, "s", first), redAnswer(stopState, "s", second)].map((r) => Object.keys(r)[0])).toEqual(["decision", "systemMessage"]);
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs(14)}\n  return -1;\n}\n`);
-    expect(redAnswer(repo, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toHaveProperty("decision", "block");
+    expect(redAnswer(stopState, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toHaveProperty("decision", "block");
   }, 120_000);
   test("stdin that is not JSON is an error (exit 1), not an allow", () => {
     const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: "garbage", encoding: "utf8" });

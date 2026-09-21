@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, WHOLE } from "./diff.ts";
-import { adapterForFile, rootForFile, type LanguageRoot } from "./lang.ts";
+import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot } from "./lang.ts";
 import { npmSpec, packageSpec, pinnedVersion, toolsDir } from "./tools.ts";
 import { git, gitPaths, lines, refuse, run } from "./util.ts";
 
@@ -25,20 +25,13 @@ const FAIL_COUNTS = [/^\s*(\d+) fail\b/gm, /^\s*(\d+) failed\b/gm, /^ℹ fail (\
 // Fallback toolchain when the repo has no eslint; pinned in tools.ts like every other tool.
 const fallbackPkgs = (o: Opts) => ["eslint", "typescript-eslint-parser", "typescript"].map((id) => npmSpec(id, o.toml.tools));
 
-function defaultTestCmd(repo: string, lang: string) {
-  if (lang === "py") return 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV"';
-  const packageJson = join(repo, "package.json");
-  if (!existsSync(packageJson)) return 'bun test scripts/ --coverage --coverage-reporter=lcov --coverage-dir="$QG_DIR/bun" && cp "$QG_DIR/bun/lcov.info" "$QG_LCOV"';
-  const pkg = existsSync(packageJson) ? readFileSync(packageJson, "utf8") : "";
-  if (pkg.includes('"vitest"'))
-    return 'npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory="$QG_DIR/vitest" && cp "$QG_DIR/vitest/lcov.info" "$QG_LCOV"';
-  return "node --test --experimental-test-coverage --test-coverage-exclude='**/*.test.*' --test-reporter=lcov --test-reporter-destination=\"$QG_LCOV\" --test-reporter=spec --test-reporter-destination=stdout";
-}
+const readText = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+const defaultTestCmd = (o: Opts, lang = o.lang) => defaultTestCommand(o.repo, lang, readText);
 
 function configuredTestCmd(o: Opts) {
   if (o.testCmd) return o.testCmd;
-  if (o.lang === "ts" || o.lang === "py") return defaultTestCmd(o.repo, o.lang);
-  return o.langs[0]?.adapter.coverage.command ?? defaultTestCmd(o.repo, "ts");
+  if (o.lang === "ts" || o.lang === "py") return defaultTestCmd(o);
+  return o.langs[0]?.adapter.coverage.command ?? defaultTestCmd(o, "ts");
 }
 
 const metaPath = (o: Opts) => join(o.out, "lcov.meta.json");

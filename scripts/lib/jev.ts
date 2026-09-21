@@ -322,7 +322,7 @@ function noteLine(v: Verdict, r: Review) {
 }
 
 function logVerdicts(o: Opts, vs: Verdict[], r: Review) {
-  const dir = join(mainCheckout(o.repo), ".scratch/quality");
+  const dir = join(mainCheckout(o.repo), o.outDir);
   mkdirSync(dir, { recursive: true });
   const sha = run("git", ["rev-parse", "--short", "HEAD"], o.repo).out.trim();
   const ts = new Date().toISOString();

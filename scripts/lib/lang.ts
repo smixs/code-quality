@@ -13,6 +13,8 @@ export type LanguageAdapter = {
   detect: string[];
   extensions: string[];
   lizardLang: string | null;
+  // The pre-push command for the touched test files; "" = no file-level runner, DEFAULT_PRE_PUSH runs.
+  prePushTest: string;
   testGlobs: string[];
   testPatterns: TestPatterns;
   coverage: ToolAdapter;
@@ -25,6 +27,24 @@ export type LanguageAdapter = {
 export type LanguageRoot = { adapter: LanguageAdapter; root: string };
 
 const tool = (name: string, command: string, install: string, format = "json"): ToolAdapter => ({ tool: name, command, install, format });
+
+// Every default test command lives here; no runner name is written anywhere else.
+const DEFAULT_PRE_PUSH = "node --test {files}";
+const PY_PRE_PUSH = 'uv run --with pytest pytest -q {files}';
+const NODE_TEST_COVERAGE = "node --test --experimental-test-coverage --test-coverage-exclude='**/*.test.*' --test-reporter=lcov --test-reporter-destination=\"$QG_LCOV\" --test-reporter=spec --test-reporter-destination=stdout";
+const BUN_TEST_COVERAGE = 'bun test scripts/ --coverage --coverage-reporter=lcov --coverage-dir="$QG_DIR/bun" && cp "$QG_DIR/bun/lcov.info" "$QG_LCOV"';
+const VITEST_COVERAGE = 'npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory="$QG_DIR/vitest" && cp "$QG_DIR/vitest/lcov.info" "$QG_LCOV"';
+const PY_TEST_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV"';
+
+export const prePushTestCommand = (adapter?: LanguageAdapter) => adapter?.prePushTest || DEFAULT_PRE_PUSH;
+
+// The full gate's default coverage command: the repo's own runner decides, not the caller.
+export function defaultTestCommand(repo: string, lang: string, readPackage: (path: string) => string) {
+  if (lang === "py") return PY_TEST_COVERAGE;
+  const pkg = readPackage(join(repo, "package.json"));
+  if (!pkg) return BUN_TEST_COVERAGE;
+  return pkg.includes('"vitest"') ? VITEST_COVERAGE : NODE_TEST_COVERAGE;
+}
 const osv = (fallback?: string) => ({ ...tool("osv-scanner", "osv-scanner scan source --format json .", installHint("osv-scanner")), fallback });
 const patterns = (test: string[], assert: string[], ...flags: [string[], string[], string[]]): TestPatterns => ({
   test, assert, skip: flags[0], only: flags[1], mock: flags[2],
@@ -47,7 +67,7 @@ const PY_TEST = patterns(
 
 export const ADAPTERS: LanguageAdapter[] = [
   {
-    id: "ts", name: "TypeScript/JavaScript", detect: ["package.json"], extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], lizardLang: "typescript",
+    id: "ts", name: "TypeScript/JavaScript", detect: ["package.json"], extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], lizardLang: "typescript", prePushTest: DEFAULT_PRE_PUSH,
     testGlobs: ["**/*.test.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", "**/*.spec.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"], testPatterns: JS_TEST,
     coverage: tool("native JS test runner", "node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=\"$QG_LCOV\"", installHint("node"), "lcov"),
     cycles: tool("dependency-cruiser", "npx dependency-cruiser --output-type json .", "npm install -D dependency-cruiser"),
@@ -56,7 +76,7 @@ export const ADAPTERS: LanguageAdapter[] = [
     depAge: { provider: "deps.dev", ecosystem: "NPM" },
   },
   {
-    id: "py", name: "Python", detect: ["pyproject.toml", "setup.py"], extensions: [".py"], lizardLang: "python",
+    id: "py", name: "Python", detect: ["pyproject.toml", "setup.py"], extensions: [".py"], lizardLang: "python", prePushTest: PY_PRE_PUSH,
     testGlobs: ["**/test_*.py", "**/*_test.py"], testPatterns: PY_TEST,
     coverage: tool("pytest-cov", "uv run --with pytest-cov pytest --cov=. --cov-report=lcov:\"$QG_LCOV\"", "uv add --dev pytest pytest-cov", "lcov"),
     cycles: tool("pycycle", "pycycle --here --format json", "uv tool install pycycle"), dead: tool("vulture", "uvx vulture .", "uv tool install vulture", "text"),
@@ -64,72 +84,72 @@ export const ADAPTERS: LanguageAdapter[] = [
     depAge: { provider: "deps.dev", ecosystem: "PYPI" },
   },
   {
-    id: "go", name: "Go", detect: ["go.mod"], extensions: [".go"], lizardLang: "go",
+    id: "go", name: "Go", detect: ["go.mod"], extensions: [".go"], lizardLang: "go", prePushTest: "",
     testGlobs: ["**/*_test.go"], testPatterns: patterns(["\\bfunc\\s+Test", "\\bt\\.Run\\s*\\("], ["\\b(?:assert|require)\\."], ["\\bt\\.Skip(?:f|Now)?\\s*\\("], [], ["\\bmock\\."]),
     coverage: tool("go test/gcov2lcov", "go test ./... -coverprofile=coverage.out && gcov2lcov -infile coverage.out -outfile \"$QG_LCOV\"", `${installHint("go")} && ${installHint("gcov2lcov")}`, "lcov"),
     cycles: tool("go list", "go list -json ./...", installHint("go")), dead: tool("deadcode", "deadcode -json ./...", installHint("deadcode")),
     form: tool("gocyclo", "gocyclo -over 10 .", installHint("gocyclo"), "text"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "GO" },
   },
   {
-    id: "rust", name: "Rust", detect: ["Cargo.toml"], extensions: [".rs"], lizardLang: "rust",
+    id: "rust", name: "Rust", detect: ["Cargo.toml"], extensions: [".rs"], lizardLang: "rust", prePushTest: "",
     testGlobs: ["**/tests/**/*.rs", "**/*_test.rs"], testPatterns: patterns(["#\\[test\\]"], ["\\bassert(?:_eq|_ne)?!\\s*\\("], ["#\\[ignore"], [], ["\\bmockall\\b", "\\bmock!\\s*\\{"]),
     coverage: tool("cargo-llvm-cov", "cargo llvm-cov --lcov --output-path \"$QG_LCOV\"", "cargo install cargo-llvm-cov", "lcov"),
     cycles: tool("cargo-modules", "cargo modules dependencies --lib", "cargo install cargo-modules", "text"), dead: tool("cargo-machete", "cargo machete --json", "cargo install cargo-machete"),
     form: tool("cargo clippy", "cargo clippy --message-format=json", "rustup component add clippy", "jsonl"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "CARGO" },
   },
   {
-    id: "java", name: "Java", detect: ["pom.xml", "build.gradle"], extensions: [".java"], lizardLang: "java",
+    id: "java", name: "Java", detect: ["pom.xml", "build.gradle"], extensions: [".java"], lizardLang: "java", prePushTest: "",
     testGlobs: ["**/src/test/**/*.java", "**/*Test.java"], testPatterns: patterns(["@Test"], ["\\bassert[A-Z]\\w*\\s*\\("], ["@Disabled", "@Ignore"], [], ["\\bMockito\\.", "@Mock"]),
-    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:.scratch/quality/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
-    cycles: tool("jdeps", "jdeps -dotoutput .scratch/quality/jdeps -verbose:class .", "install JDK 21", "dot"), dead: tool("PMD", "pmd check -d . -R category/java/bestpractices.xml -f sarif", installHint("pmd"), "sarif"),
+    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:$QG_DIR/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
+    cycles: tool("jdeps", "jdeps -dotoutput $QG_DIR/jdeps -verbose:class .", "install JDK 21", "dot"), dead: tool("PMD", "pmd check -d . -R category/java/bestpractices.xml -f sarif", installHint("pmd"), "sarif"),
     form: tool("PMD", "pmd check -d . -R category/java/design.xml -f sarif", installHint("pmd"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
   },
   {
-    id: "kotlin", name: "Kotlin", detect: ["build.gradle.kts"], extensions: [".kt", ".kts"], lizardLang: "kotlin",
+    id: "kotlin", name: "Kotlin", detect: ["build.gradle.kts"], extensions: [".kt", ".kts"], lizardLang: "kotlin", prePushTest: "",
     testGlobs: ["**/src/test/**/*.kt", "**/*Test.kt"], testPatterns: patterns(["@Test"], ["\\bassert[A-Z]\\w*\\s*\\("], ["@Disabled", "@Ignore"], [], ["\\bmockk\\s*\\(", "@MockK"]),
-    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:.scratch/quality/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
-    cycles: tool("Konsist", "./gradlew konsistTest", "add Konsist or ArchUnit tests", "text"), dead: tool("detekt", "detekt --report sarif:.scratch/quality/detekt.sarif", installHint("detekt"), "sarif"),
-    form: tool("detekt", "detekt --report sarif:.scratch/quality/detekt.sarif", installHint("detekt"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
+    coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:$QG_DIR/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
+    cycles: tool("Konsist", "./gradlew konsistTest", "add Konsist or ArchUnit tests", "text"), dead: tool("detekt", "detekt --report sarif:$QG_DIR/detekt.sarif", installHint("detekt"), "sarif"),
+    form: tool("detekt", "detekt --report sarif:$QG_DIR/detekt.sarif", installHint("detekt"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
   },
   {
-    id: "csharp", name: "C#", detect: ["*.csproj", "*.sln"], extensions: [".cs"], lizardLang: "csharp",
+    id: "csharp", name: "C#", detect: ["*.csproj", "*.sln"], extensions: [".cs"], lizardLang: "csharp", prePushTest: "",
     testGlobs: ["**/*Tests.cs", "**/*Test.cs"], testPatterns: patterns(["\\[(?:Fact|Theory|Test)\\]"], ["\\bAssert\\."], ["\\bSkip\\s*=", "\\[Ignore"], [], ["\\bMock<", "\\bSubstitute\\."]),
     coverage: tool("Coverlet", "dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=lcov", "dotnet add package coverlet.msbuild", "lcov"),
-    cycles: tool("Roslyn analyzers", "dotnet build", "install .NET SDK and architecture analyzers", "sarif"), dead: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=.scratch/quality/roslyn.sarif", "install .NET SDK", "sarif"),
-    form: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=.scratch/quality/roslyn.sarif", "install .NET SDK", "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "NUGET" },
+    cycles: tool("Roslyn analyzers", "dotnet build", "install .NET SDK and architecture analyzers", "sarif"), dead: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=$QG_DIR/roslyn.sarif", "install .NET SDK", "sarif"),
+    form: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=$QG_DIR/roslyn.sarif", "install .NET SDK", "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "NUGET" },
   },
   {
-    id: "swift", name: "Swift", detect: ["Package.swift"], extensions: [".swift"], lizardLang: "swift",
+    id: "swift", name: "Swift", detect: ["Package.swift"], extensions: [".swift"], lizardLang: "swift", prePushTest: "",
     testGlobs: ["**/Tests/**/*.swift", "**/*Tests.swift"], testPatterns: patterns(["\\bfunc\\s+test"], ["\\bXCTAssert"], ["\\bXCTSkip"], [], ["\\bMock\\w+"]),
     coverage: tool("xccov2lcov", "xcrun xccov view --report --json .build/*.xcresult | xccov2lcov > \"$QG_LCOV\"", installHint("xccov2lcov"), "lcov"),
     cycles: tool("swift package", "swift package show-dependencies --format json", "install Xcode command-line tools"), dead: tool("periphery", "periphery scan --format json", installHint("periphery")),
     form: tool("SwiftLint", "swiftlint lint --reporter json", installHint("swiftlint")), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "swiftpm", registry: "swift" },
   },
   {
-    id: "php", name: "PHP", detect: ["composer.json"], extensions: [".php"], lizardLang: "php",
+    id: "php", name: "PHP", detect: ["composer.json"], extensions: [".php"], lizardLang: "php", prePushTest: "",
     testGlobs: ["**/tests/**/*.php", "**/*Test.php"], testPatterns: patterns(["\\bfunction\\s+test"], ["\\$this->assert", "\\bself::assert"], ["markTestSkipped\\s*\\("], [], ["createMock\\s*\\(", "\\bMockery::"]),
-    coverage: tool("PHPUnit Clover/ReportGenerator", "reportgenerator -reports:clover.xml -targetdir:.scratch/quality/php -reporttypes:lcov", `composer require --dev phpunit/phpunit && ${installHint("reportgenerator")}`, "lcov"),
+    coverage: tool("PHPUnit Clover/ReportGenerator", "reportgenerator -reports:clover.xml -targetdir:$QG_DIR/php -reporttypes:lcov", `composer require --dev phpunit/phpunit && ${installHint("reportgenerator")}`, "lcov"),
     cycles: tool("deptrac", "vendor/bin/deptrac analyse --formatter=json", "composer require --dev qossmic/deptrac-shim"), dead: tool("PHPStan", "vendor/bin/phpstan analyse --error-format=json", "composer require --dev phpstan/phpstan"),
     form: tool("PHPMD", "phpmd . json cleancode,codesize", "composer require --dev phpmd/phpmd"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "composer", registry: "packagist" },
   },
   {
-    id: "ruby", name: "Ruby", detect: ["Gemfile"], extensions: [".rb"], lizardLang: "ruby",
+    id: "ruby", name: "Ruby", detect: ["Gemfile"], extensions: [".rb"], lizardLang: "ruby", prePushTest: "",
     testGlobs: ["**/spec/**/*_spec.rb", "**/test/**/*_test.rb"], testPatterns: patterns(["\\bit\\s*(?:\\(|[\"'])", "\\btest\\s+[\"']"], ["\\bexpect\\s*\\(", "\\bassert"], ["\\bskip\\b", "xit\\s*\\("], ["fit\\s*\\(", "focus:\\s*true"], ["allow\\s*\\(", "instance_double\\s*\\("]),
     coverage: tool("simplecov-lcov", "bundle exec ruby -Itest && cp coverage/lcov/*.lcov \"$QG_LCOV\"", "bundle add simplecov-lcov --group test", "lcov"),
     cycles: tool("Packwerk", "bundle exec packwerk check", "bundle add packwerk --group development", "text"), dead: tool("RuboCop", "bundle exec rubocop --format json", "bundle add rubocop --group development,test"),
     form: tool("RuboCop", "bundle exec rubocop --format json", "bundle add rubocop --group development,test"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "RUBYGEMS" },
   },
   {
-    id: "cpp", name: "C/C++", detect: ["CMakeLists.txt", "Makefile"], extensions: [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"], lizardLang: "cpp",
+    id: "cpp", name: "C/C++", detect: ["CMakeLists.txt", "Makefile"], extensions: [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"], lizardLang: "cpp", prePushTest: "",
     testGlobs: ["**/test/**/*.{c,cc,cpp,cxx}", "**/*_test.{c,cc,cpp,cxx}"], testPatterns: patterns(["\\bTEST(?:_F|_P)?\\s*\\("], ["\\b(?:EXPECT|ASSERT)_"], ["\\bGTEST_SKIP\\s*\\("], ["DISABLED_"], ["\\bMOCK_METHOD\\s*\\("]),
-    coverage: tool("gcov/ReportGenerator", "reportgenerator -reports:**/*.gcov.xml -targetdir:.scratch/quality/cpp -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
+    coverage: tool("gcov/ReportGenerator", "reportgenerator -reports:**/*.gcov.xml -targetdir:$QG_DIR/cpp -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
     cycles: tool("include-what-you-use", "include-what-you-use .", installHint("include-what-you-use"), "text"), dead: tool("clang-tidy", "clang-tidy -checks=misc-unused-*", installHint("clang-tidy"), "yaml"),
     form: tool("clang-tidy", "clang-tidy -checks=readability-function-cognitive-complexity", installHint("clang-tidy"), "yaml"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "conan", registry: "conan-center" },
   },
   {
-    id: "dart", name: "Dart", detect: ["pubspec.yaml"], extensions: [".dart"], lizardLang: null,
+    id: "dart", name: "Dart", detect: ["pubspec.yaml"], extensions: [".dart"], lizardLang: null, prePushTest: "",
     testGlobs: ["**/test/**/*_test.dart"], testPatterns: patterns(["\\btest\\s*\\("], ["\\bexpect\\s*\\("], ["skip\\s*:"], ["solo_test\\s*\\("], ["registerFallbackValue\\s*\\(", "when\\s*\\("]),
-    coverage: tool("coverage:format_coverage", "dart test --coverage=.scratch/quality/dart && format_coverage --lcov --in=.scratch/quality/dart --out=\"$QG_LCOV\" --packages=.dart_tool/package_config.json --report-on=lib", "dart pub global activate coverage", "lcov"),
+    coverage: tool("coverage:format_coverage", "dart test --coverage=$QG_DIR/dart && format_coverage --lcov --in=$QG_DIR/dart --out=\"$QG_LCOV\" --packages=.dart_tool/package_config.json --report-on=lib", "dart pub global activate coverage", "lcov"),
     cycles: tool("dart analyze", "dart analyze --format=json", "install Dart SDK", "json"), dead: tool("dart analyze", "dart analyze --format=json", "install Dart SDK", "json"),
     form: tool("dart_code_metrics", "dart run dart_code_metrics:metrics analyze lib --reporter=json", "dart pub add --dev dart_code_metrics", "json"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "pub", registry: "pub.dev" },
   },

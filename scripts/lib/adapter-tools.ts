@@ -56,6 +56,7 @@ const slug = (name: string) => name.toLowerCase().replace(/^cargo\s+/, "").repla
 export function adapterChecks(o: Opts, kinds: AdapterToolKind[], options: AdapterOptions = {}): AdapterToolCheck[] {
   const roots = options.roots ?? o.langs;
   const runner = options.runner ?? run;
+  const env = options.env ?? { ...process.env, QG_DIR: o.out };
   const regularKinds = kinds.filter((kind) => kind !== "audit");
   const seen = new Set<string>();
   const checks: AdapterToolCheck[] = [];
@@ -65,11 +66,11 @@ export function adapterChecks(o: Opts, kinds: AdapterToolKind[], options: Adapte
       const key = `${root.root}\0${kind}\0${tool.command}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      checks.push(runAdapter({ o, root, kind, tool, runner, env: options.env }));
+      checks.push(runAdapter({ o, root, kind, tool, runner, env }));
     }
   }
   const grouped = groupNotices(checks);
-  return kinds.includes("audit") ? [...grouped, auditCheck(o, runner, options.env)] : grouped;
+  return kinds.includes("audit") ? [...grouped, auditCheck(o, runner, env)] : grouped;
 }
 
 function auditCheck(o: Opts, runner: Runner, env?: NodeJS.ProcessEnv): AdapterToolCheck {
@@ -177,7 +178,7 @@ function runAdapter(request: RunRequest): AdapterToolCheck {
 function parsedCheck(request: RunRequest, name: string, cwd: string, result: ToolResult): AdapterToolCheck {
   const { o, root, kind, tool } = request;
   try {
-    const output = adapterOutput(tool, result.out, cwd);
+    const output = adapterOutput(tool, result.out, cwd, request.env?.QG_DIR ?? o.out);
     const findings = parseAdapterOutput({ adapter: root.adapter.id, kind, tool, output, repo: o.repo, cwd });
     if (acceptedResult(kind, result.code, findings)) return tagged(root.adapter.id, kind, check(name, findings));
     return tagged(root.adapter.id, kind, check(name, [], `${tool.tool} exit ${result.code}: ${shortError(result.err || result.out)}`));
@@ -205,10 +206,12 @@ function missingTool(code: number, error: string) {
 }
 const shortError = (text: string) => text.trim().replace(/\s+/g, " ").slice(0, 240) || "no output";
 
-function adapterOutput(tool: ToolAdapter, stdout: string, cwd: string) {
+// A tool that writes SARIF to a file names it in its command; $QG_DIR there is the report directory.
+function adapterOutput(tool: ToolAdapter, stdout: string, cwd: string, outDir: string) {
   if (stdout.trim() || tool.format !== "sarif") return stdout;
   const match = /(?:sarif:|ErrorLog=)?([^\s:=]+\.sarif)\b/i.exec(tool.command);
-  const path = match ? resolve(cwd, match[1]) : "";
+  const named = match ? match[1].replace(/\$QG_DIR|\$\{QG_DIR\}/g, outDir) : "";
+  const path = named ? resolve(cwd, named) : "";
   return path && existsSync(path) ? readFileSync(path, "utf8") : stdout;
 }
 

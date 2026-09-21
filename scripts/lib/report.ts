@@ -88,7 +88,7 @@ export const bypassNotices = (checks: Check[]) => checkNotices(checks).filter((l
 export function writeReport(o: Opts, a: Analysis, g: { checks: Check[]; drift: string[]; escalate: string[] }, name: string) {
   const ch = churn(o.repo);
   const scope = a.docsOnly ? "docs-only" : `${o.scope.kind}${o.scope.rev ? ` ${o.scope.rev}` : ""}`;
-  const L = [`# Quality report ${new Date().toISOString()}`, "", `repo ${o.repo} @ ${headLabel(o.repo)}, scope ${scope}, base ${o.base}, config ${o.cfgFile || "defaults"}, baseline ${o.baseline}`, testsLine(a.tests), ""];
+  const L = [`# Quality report ${new Date().toISOString()}`, "", `repo ${o.repo} @ ${headLabel(o.repo)}, scope ${scope}, base ${o.base}${o.baseAuto ? " (detected)" : ""}, config ${o.cfgFile || "defaults"}, baseline ${o.baseline}`, testsLine(a.tests), ""];
   const bypasses = bypassNotices(g.checks);
   L.push("## Gate", ...g.checks.flatMap(checkLines), "", "## Bypasses", ...bypasses.map((line) => `- ${line}`), "", "## Escalate to reviewer (not wired yet, note only)", ...g.escalate.map((f) => `- ${f}`), "");
   L.push("## Drift (unchanged functions worse than baseline, not gated)", ...g.drift.map((x) => `- ${x}`), "");

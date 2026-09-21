@@ -1,4 +1,4 @@
-// dependency-cruiser (cycles, layers) and knip (dead code), temp configs under .scratch/quality.
+// dependency-cruiser (cycles, layers) and knip (dead code), temp configs under [project] out_dir.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";

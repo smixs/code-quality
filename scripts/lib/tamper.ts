@@ -86,7 +86,7 @@ function allowFilePermitted(o: Opts) {
 }
 
 function allowFile(o: Opts) {
-  const path = join(o.repo, ".scratch/quality/allow.md");
+  const path = join(o.repo, o.outDir, "allow.md");
   return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
@@ -361,7 +361,7 @@ function baselineTouched(o: Opts, ch: Changes, context: TamperContext) {
   const sources = [...ch.keys()].filter((f) => isProjectSource(o, f) || isSourceForDirs(o.lang, oldDirs, f));
   const findings: Finding[] = [];
   const notes: string[] = [];
-  for (const item of protectedChanges(ch, config)) {
+  for (const item of protectedChanges(ch, config, o.outDir)) {
     const block = item.kind === "marker" ? item.other : sources.length > 0;
     if (block) findings.push(finding("tamper/baseline-touched", item.file, item.line, item.msg));
     else notes.push(`note: tamper/baseline-touched ${item.file}:${item.line} ${item.msg}`);
@@ -372,10 +372,11 @@ function baselineTouched(o: Opts, ch: Changes, context: TamperContext) {
 type Protected = { kind: "baseline" | "config" | "marker"; file: string; line: number; msg: string; other: boolean };
 type ConfigPair = { before: string; after: string };
 
-function protectedChanges(ch: Changes, config: ConfigPair): Protected[] {
+function protectedChanges(ch: Changes, config: ConfigPair, outDir: string): Protected[] {
   const out: Protected[] = [];
-  const baseline = ch.get(".scratch/quality/baseline.json");
-  if (baseline) out.push({ kind: "baseline", file: ".scratch/quality/baseline.json", line: 1, msg: "quality baseline changed", other: false });
+  const baselineFile = `${outDir}/baseline.json`;
+  const baseline = ch.get(baselineFile);
+  if (baseline) out.push({ kind: "baseline", file: baselineFile, line: 1, msg: "quality baseline changed", other: false });
   const quality = ch.get(".quality.toml");
   const configDiff = quality ? protectedConfigDiff(config.before, config.after) : [];
   if (quality && configDiff.length) out.push({ kind: "config", file: ".quality.toml", line: quality.hunks[0]?.newStart ?? 1, msg: `protected config changed: ${configDiff.join("; ")}`, other: false });

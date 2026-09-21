@@ -2,14 +2,14 @@
 // Every entry point runs the same analysis; vendors only differ in how they call this file.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
-import { type Args, buildOpts, CONFIG_FILE, type Opts, readArgs, repoConfigFile } from "./config.ts";
+import { type Args, buildOpts, CONFIG_FILE, DEFAULTS, type Opts, readArgs, repoConfigFile } from "./config.ts";
 import { runTests } from "./crap.ts";
 import { parseDiff, type Changes } from "./diff.ts";
 import { diffCoverageCheck } from "./diffcov.ts";
 import { adapterAuditGateChecks, analyze, gate } from "./gate.ts";
 import { checkNotices, failCount, testsLine, verdictText, writeHookReport, writeReport } from "./report.ts";
 import { defaultJev, type JevDeps, jevNotes } from "./jev.ts";
-import { adapterForFile, isTestFile, siblingTestFiles } from "./lang.ts";
+import { adapterById, adapterForFile, isTestFile, prePushTestCommand, siblingTestFiles } from "./lang.ts";
 import { gitleaksCheck } from "./security.ts";
 import { isProjectSource, tamperCheck } from "./tamper.ts";
 import { commitMsgFindings } from "./text.ts";
@@ -143,8 +143,7 @@ function tsAliases(repo: string): Alias[] {
 }
 
 function prePushCmd(o: Opts) {
-  if (o.toml.hooks.pre_push_test_cmd) return o.toml.hooks.pre_push_test_cmd;
-  return o.lang === "py" ? "uv run --with pytest pytest -q {files}" : "node --test {files}";
+  return o.toml.hooks.pre_push_test_cmd || prePushTestCommand(adapterById(o.lang));
 }
 
 const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
@@ -284,9 +283,10 @@ function chainNote(repo: string) {
 
 function installNotes(repo: string) {
   const out: string[] = [];
+  const o = buildOpts(readArgs([`--repo=${repo}`]));
   if (!repoConfigFile(repo)) out.push(`note: no ${CONFIG_FILE}; defaults are used`);
-  if (!existsSync(buildOpts(readArgs([`--repo=${repo}`])).baseline)) out.push(`warn: no baseline yet; existing cycles and knip entries are reported but not judged, and new debt is compared with project.base; run once: bun ${resolve(import.meta.dir, "../quality.ts")} --repo ${repo} --update-baseline`);
-  if (run("git", ["check-ignore", "-q", ".scratch/quality/x"], repo).code !== 0) out.push("warn: .scratch/ is not in .gitignore; reports land in .scratch/quality");
+  if (!existsSync(o.baseline)) out.push(`warn: no baseline yet; existing cycles and knip entries are reported but not judged, and new debt is compared with project.base; run once: bun ${resolve(import.meta.dir, "../quality.ts")} --repo ${repo} --update-baseline`);
+  if (run("git", ["check-ignore", "-q", `${o.outDir}/x`], repo).code !== 0) out.push(`warn: ${o.outDir} is not ignored by git; reports land there`);
   const common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").trim();
   if (common !== join(repo, ".git")) out.push(`note: ${repo} is a worktree; the setting lives in ${common}/config and covers every worktree of this repo`);
   return out;
@@ -333,16 +333,17 @@ function stopInput() {
   }
 }
 
-const markerPath = (repo: string) => join(repo, ".scratch/quality/stop-block.json");
+const markerPath = (repo: string, outDir: string) => join(repo, outDir, "stop-block.json");
 
-function alreadyBlocked(repo: string, key: string) {
-  const path = markerPath(repo);
+function alreadyBlocked(state: StopState, key: string) {
+  const path = markerPath(state.repo, state.outDir);
   return existsSync(path) && readFileSync(path, "utf8") === key;
 }
 
-function remember(repo: string, key: string) {
-  mkdirSync(dirname(markerPath(repo)), { recursive: true });
-  writeFileSync(markerPath(repo), key);
+function remember(state: StopState, key: string) {
+  const path = markerPath(state.repo, state.outDir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, key);
 }
 
 function stopRepo(cwd: string) {
@@ -363,23 +364,24 @@ async function stopVerdict(args: Args, repo: string): Promise<Verdict> {
 // A session judges only when it touched the repo: a dirty --src path, or HEAD moved since this
 // session's last Stop. The first Stop of a session with a clean tree records HEAD and allows: its
 // commits, if any, already went through pre-commit.
-const headsPath = (repo: string) => join(repo, ".scratch/quality/stop-heads.json");
+const headsPath = (state: StopState) => join(state.repo, state.outDir, "stop-heads.json");
 
-function readHeads(repo: string): Record<string, string> {
-  const path = headsPath(repo);
+function readHeads(state: StopState): Record<string, string> {
+  const path = headsPath(state);
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
 }
 
-function sessionTouched(args: Args, repo: string, session: string) {
+function sessionTouched(args: Args, state: StopState, session: string) {
+  const repo = state.repo;
   try {
     const dirs = buildOpts({ ...args, values: { ...args.values, repo } }).dirs;
     const dirty = git(repo, "status", "--porcelain", "--", ...dirs).trim() !== "";
     const head = run("git", ["rev-parse", "HEAD"], repo).out.trim();
-    const heads = readHeads(repo);
+    const heads = readHeads(state);
     const moved = session in heads && heads[session] !== head;
     const kept = Object.entries({ ...heads, [session]: head }).slice(-50);
-    mkdirSync(dirname(headsPath(repo)), { recursive: true });
-    writeFileSync(headsPath(repo), JSON.stringify(Object.fromEntries(kept)));
+    mkdirSync(dirname(headsPath(state)), { recursive: true });
+    writeFileSync(headsPath(state), JSON.stringify(Object.fromEntries(kept)));
     return dirty || moved;
   } catch {
     // Cannot tell (broken config or state file): judge, so stopVerdict reports the real error.
@@ -387,24 +389,36 @@ function sessionTouched(args: Args, repo: string, session: string) {
   }
 }
 
+// The repo and the directory its state files live in: a broken config must not trap the agent, so
+// the default out_dir stands in when the config cannot be read.
+export type StopState = { repo: string; outDir: string };
+
+function stopState(args: Args, repo: string): StopState {
+  try {
+    return { repo, outDir: buildOpts({ ...args, values: { ...args.values, repo } }).outDir };
+  } catch {
+    return { repo, outDir: DEFAULTS.project.out_dir };
+  }
+}
+
 export async function agentStop(args: Args) {
   const input = stopInput();
   const session = input.session_id ?? "";
-  const repo = stopRepo(input.cwd ?? process.cwd());
-  const r = await stopResult(args, repo, session);
-  console.log(JSON.stringify(r.ok ? {} : redAnswer(repo, session, r)));
+  const state = stopState(args, stopRepo(input.cwd ?? process.cwd()));
+  const r = await stopResult(args, state, session);
+  console.log(JSON.stringify(r.ok ? {} : redAnswer(state, session, r)));
 }
 
-async function stopResult(args: Args, repo: string, session: string): Promise<Verdict> {
-  if (!repo || !sessionTouched(args, repo, session)) return { ok: true, text: "" };
-  return stopVerdict(args, repo);
+async function stopResult(args: Args, state: StopState, session: string): Promise<Verdict> {
+  if (!state.repo || !sessionTouched(args, state, session)) return { ok: true, text: "" };
+  return stopVerdict(args, state.repo);
 }
 
 // The key holds only the deterministic red lines: a Jev note that changes (timeout, drift) between two
 // Stops must not count as a new verdict and block the agent a second time.
-export function redAnswer(repo: string, session: string, r: Verdict) {
+export function redAnswer(state: StopState, session: string, r: Verdict) {
   const key = JSON.stringify([session, r.verdict ?? r.text]);
-  if (alreadyBlocked(repo, key)) return { systemMessage: `quality gate still red after one retry:\n${r.text}` };
-  remember(repo, key);
-  return { decision: "block", reason: `Quality gate is red in ${repo}. Fix before finishing:\n${r.text}` };
+  if (alreadyBlocked(state, key)) return { systemMessage: `quality gate still red after one retry:\n${r.text}` };
+  remember(state, key);
+  return { decision: "block", reason: `Quality gate is red in ${state.repo}. Fix before finishing:\n${r.text}` };
 }

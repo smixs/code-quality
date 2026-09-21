@@ -237,7 +237,7 @@ function baseTreeOpts(o: Opts, root: string): Opts {
   const unpack = run("tar", ["-xf", archive, "-C", tree], o.repo);
   if (unpack.code !== 0) throw new Error(`cannot unpack ${ref} for missing-baseline comparison: ${unpack.err.trim()}`);
   linkNodeModules(o.repo, tree);
-  const base = { ...o, repo: tree, out: join(tree, ".scratch/quality"), baseline: join(tree, ".scratch/quality/baseline.json") };
+  const base = { ...o, repo: tree, out: join(tree, o.outDir), baseline: join(tree, o.outDir, "baseline.json") };
   mkdirSync(base.out, { recursive: true });
   return base;
 }

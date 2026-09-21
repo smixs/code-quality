@@ -4,13 +4,14 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { adapterById, detectLanguageRoots } from "./lang.ts";
 import { validateToolOverrides } from "./tools.ts";
-import { mainCheckout, splitList } from "./util.ts";
+import { mainCheckout, run, splitList } from "./util.ts";
 
 export const CONFIG_FILE = ".quality.toml";
 
 // One bar everywhere (owner, 18.09.2026): changed functions gate on cc/CRAP; repo mean is a warning threshold.
 export const DEFAULTS = {
-  project: { language: "" as string | string[], src: ["."], base: "origin/main", test_cmd: "", tools_dir: "" },
+  // base "" = detect from the remote (see detectBase); out_dir holds every report this gate writes.
+  project: { language: "" as string | string[], src: ["."], base: "", test_cmd: "", tools_dir: "", out_dir: ".scratch/quality" },
   thresholds: {
     max_cc: 10,
     max_crap: 30,
@@ -140,15 +141,27 @@ function scopeOf(v: Args["values"]) {
 type V = Args["values"];
 
 function pathsOf(v: V, t: Toml, repo: string) {
-  const baseline = v.baseline ? resolve(v.baseline) : join(mainCheckout(repo), ".scratch/quality/baseline.json");
+  const outDir = t.project.out_dir || DEFAULTS.project.out_dir;
+  const baseline = v.baseline ? resolve(v.baseline) : join(mainCheckout(repo), outDir, "baseline.json");
   const langs = detectLanguageRoots(repo, t.project.language);
-  return { out: join(repo, ".scratch/quality"), baseline, langs, lang: langs[0]?.adapter.id ?? "ts" };
+  return { outDir, out: join(repo, outDir), baseline, langs, lang: langs[0]?.adapter.id ?? "ts" };
 }
 
-function projectOf(v: V, t: Toml) {
+// What the remote publishes as its default branch; the usual names are the fallback. A configured
+// project.base (or --base) always wins, and the report header says when the base was detected.
+export function detectBase(repo: string) {
+  const head = run("git", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo);
+  if (head.code === 0 && head.out.trim()) return head.out.trim();
+  const known = ["origin/main", "origin/master", "main"];
+  return known.find((ref) => run("git", ["rev-parse", "-q", "--verify", ref], repo).code === 0) ?? "origin/main";
+}
+
+function projectOf(v: V, t: Toml, repo: string) {
+  const configured = v.base ?? t.project.base;
   return {
     dirs: listOr(v.src ? [v.src] : undefined, t.project.src),
-    base: v.base ?? t.project.base,
+    base: configured || detectBase(repo),
+    baseAuto: !configured,
     testCmd: v["test-cmd"] ?? t.project.test_cmd,
   };
 }
@@ -168,5 +181,5 @@ export function buildOpts(args: Args) {
   const cfgFile = configPath(repo, v.config);
   const t = cfgFile ? loadToml(cfgFile) : DEFAULTS;
   const entry = args.positionals[0] ?? "full";
-  return { repo, cfgFile, toml: t, ...pathsOf(v, t, repo), ...projectOf(v, t), ...rulesOf(v, t), scope: scopeOf(v), flags: v, entry };
+  return { repo, cfgFile, toml: t, ...pathsOf(v, t, repo), ...projectOf(v, t, repo), ...rulesOf(v, t), scope: scopeOf(v), flags: v, entry };
 }
