@@ -4,7 +4,7 @@
 
 A quality gate for coding agents. It runs from git hooks and from the Stop hooks of Claude Code, Codex and pi, blocks test tampering, and holds one complexity bar on every changed function. 12 languages, one config file, no server.
 
-![Quality gate output: GATE FAIL (3) with three tamper findings, next to GATE PASS](assets/hero.svg)
+![Code Quality Skill: a quality gate for AI coding agents, red barrier down, green barrier up](assets/hero.webp)
 
 [![skills.sh](https://skills.sh/b/smixs/code-quality-skill)](https://skills.sh/smixs/code-quality-skill)
 [![Claude Skill](https://img.shields.io/badge/Claude-Skill-blueviolet?style=flat-square)](https://docs.claude.com/en/docs/agents/agent-skills)
