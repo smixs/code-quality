@@ -6,7 +6,6 @@ A quality gate for coding agents. It runs from git hooks and from the Stop hooks
 
 ![Code Quality Skill: a quality gate for AI coding agents, red barrier down, green barrier up](assets/hero.webp)
 
-[![skills.sh](https://skills.sh/b/smixs/code-quality-skill)](https://skills.sh/smixs/code-quality-skill)
 [![Claude Skill](https://img.shields.io/badge/Claude-Skill-blueviolet?style=flat-square)](https://docs.claude.com/en/docs/agents/agent-skills)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-126_passing-brightgreen?style=flat-square)](scripts/)
