@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { basename, dirname, join } from "node:path";
 import type { Opts } from "./config.ts";
 import type { Changes, FileDiff } from "./diff.ts";
+import { registryLookup } from "./lang.ts";
 import { redactSensitiveText } from "./text.ts";
 import { installHint, toolBinary } from "./tools.ts";
 import { bypassNote, check, type Check, type Finding, notedCheck, run } from "./util.ts";
@@ -87,22 +88,23 @@ function gitleaksFinding(item: GitleaksFinding): Finding {
 
 // ---- changed lock entries and release age
 
-type Registry = "npm" | "pypi";
+// The ecosystem of the lock entry; lang.ts knows which registry answers for it.
+type Registry = string;
 type LockRecord = { name: string; version: string; line: number; end: number; registry: Registry; file?: string };
 type PackageLockRecord = LockRecord & { registryBacked: boolean };
 type PackageLockState = { current: PackageLockRecord | null; packagesIndent: number; end: number; out: LockRecord[] };
 type AgeCache = { version: 1; published: Record<string, string> };
-type Published = { date?: string; offline?: true; error?: string };
-type AgeState = { cache: AgeCache; findings: Finding[]; errors: string[]; changed: boolean; offline: boolean };
+type Published = { date?: string; offline?: true; error?: string; noRegistry?: string };
+type AgeState = { cache: AgeCache; findings: Finding[]; errors: string[]; changed: boolean; offline: boolean; noRegistry: Set<string> };
 
 export function lockAgeCheck(o: Opts, ch: Changes, deps: SecurityDeps = REAL): Check {
   const records = changedLockRecords(o, ch);
   if (!records.length || o.toml.thresholds.min_release_age_days <= 0) return check("deps/lock-age", []);
   const path = join(o.out, "pkg-age.json");
-  const state: AgeState = { cache: readAgeCache(path), findings: [], errors: [], changed: false, offline: false };
+  const state: AgeState = { cache: readAgeCache(path), findings: [], errors: [], changed: false, offline: false, noRegistry: new Set() };
   for (const record of records) if (checkRecordAge(o, record, state, deps)) break;
   if (state.changed) writeJson(path, state.cache);
-  const notices = state.offline ? ["deps/lock-age: not checked (offline)"] : [];
+  const notices = state.offline ? ["deps/lock-age: not checked (offline)"] : [...state.noRegistry].sort().map((eco) => `deps/lock-age: not checked (no registry for ${eco})`);
   return { name: "deps/lock-age", findings: state.findings, error: state.errors.join("; "), note: "", notices };
 }
 
@@ -112,6 +114,11 @@ function checkRecordAge(o: Opts, record: LockRecord, state: AgeState, deps: Secu
   if (result.offline) {
     state.offline = true;
     return true;
+  }
+  // No registry for this ecosystem: a line, never a block, and never a repeated lookup.
+  if (result.noRegistry) {
+    state.noRegistry.add(result.noRegistry);
+    return false;
   }
   if (result.error || !result.date) {
     state.errors.push(`${record.name}@${record.version}: ${result.error || "publication date missing"}`);
@@ -265,29 +272,17 @@ function readAgeCache(path: string): AgeCache {
   return { version: 1, published: {} };
 }
 
+// One HTTP lookup per ecosystem, from the table in lang.ts: no registry is wired in here.
 function publishedAt(record: LockRecord, o: Opts, deps: SecurityDeps): Published {
-  if (record.registry === "npm") return npmPublished(record, o, deps);
-  const url = `https://pypi.org/pypi/${encodeURIComponent(record.name)}/${encodeURIComponent(record.version)}/json`;
-  const result = deps.run("curl", ["-fsSL", "--max-time", "10", url], o.repo);
+  const lookup = registryLookup({ registry: record.registry, name: record.name, version: record.version, urls: o.toml.security.registry_urls });
+  if (!lookup) return { noRegistry: record.registry };
+  const result = deps.run("curl", ["-fsSL", "--max-time", "10", lookup.url], o.repo);
   if (result.code !== 0) return failedRegistry(result);
   try {
-    const json = JSON.parse(result.out);
-    const dates = (json.urls ?? []).map((item: { upload_time_iso_8601?: string }) => item.upload_time_iso_8601).filter(Boolean).sort();
-    return dates[0] ? { date: dates[0] } : { error: "PyPI response has no upload time" };
+    const date = lookup.date(JSON.parse(result.out));
+    return date ? { date } : { error: `${record.registry} response has no publication time for ${record.version}` };
   } catch (e) {
-    return { error: `invalid PyPI JSON: ${(e as Error).message}` };
-  }
-}
-
-function npmPublished(record: LockRecord, o: Opts, deps: SecurityDeps): Published {
-  const result = deps.run("npm", ["view", `${record.name}@${record.version}`, "time", "--json"], o.repo);
-  if (result.code !== 0) return failedRegistry(result);
-  try {
-    const value = JSON.parse(result.out);
-    const date = typeof value === "string" ? value : value[record.version];
-    return typeof date === "string" ? { date } : { error: "npm response has no version publication time" };
-  } catch (e) {
-    return { error: `invalid npm JSON: ${(e as Error).message}` };
+    return { error: `invalid ${record.registry} JSON: ${(e as Error).message}` };
   }
 }
 

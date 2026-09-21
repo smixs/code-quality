@@ -114,6 +114,8 @@ describe("deps/lock-age", () => {
   },
 }`;
 
+  const npmAnswer = (version: string, date: string) => JSON.stringify({ time: { [version]: date } });
+
   test("accepts an old changed lock entry and reuses pkg-age.json without a registry call", () => {
     const repo = tmp();
     const text = lock("1.3.0");
@@ -121,7 +123,7 @@ describe("deps/lock-age", () => {
     let calls = 0;
     const deps = fake(() => {
       calls++;
-      return result(0, JSON.stringify({ "1.3.0": "2020-01-01T00:00:00.000Z" }));
+      return result(0, npmAnswer("1.3.0", "2020-01-01T00:00:00.000Z"));
     });
     const o = options(repo);
     expect(lockAgeCheck(o, added("bun.lock", text), deps).findings).toEqual([]);
@@ -141,7 +143,7 @@ describe("deps/lock-age", () => {
     const text = lock("2.0.0");
     writeFileSync(join(repo, "bun.lock"), text);
     const now = Date.UTC(2026, 8, 21, 12);
-    const deps = fake(() => result(0, JSON.stringify({ "2.0.0": new Date(now - 2 * 3_600_000).toISOString() })), now);
+    const deps = fake(() => result(0, npmAnswer("2.0.0", new Date(now - 2 * 3_600_000).toISOString())), now);
     const finding = lockAgeCheck(options(repo), added("bun.lock", text), deps).findings[0];
     expect(finding.msg).toBe("left-pad@2.0.0 published 2 hours ago; Bun minimumReleaseAge does not apply to locked versions (oven-sh/bun#30525)");
   });
@@ -163,13 +165,41 @@ describe("deps/lock-age", () => {
   }
 }`;
     writeFileSync(join(repo, "package-lock.json"), text);
-    let request = "";
-    const deps = fake((_cmd, args) => {
-      request = args[1];
-      return result(0, JSON.stringify({ "3.25.2": "2020-01-01T00:00:00.000Z" }));
+    let request: string[] = [];
+    const deps = fake((cmd, args) => {
+      request = [cmd, args.at(-1) ?? ""];
+      return result(0, npmAnswer("3.25.2", "2020-01-01T00:00:00.000Z"));
     });
     expect(lockAgeCheck(options(repo), added("package-lock.json", text), deps).error).toBe("");
-    expect(request).toBe("zod-to-json-schema@3.25.2");
+    expect(request).toEqual(["curl", "https://registry.npmjs.org/zod-to-json-schema"]);
+  });
+
+  test("[security] registry_urls sends the lookup to a mirror", () => {
+    const repo = tmp();
+    const text = lock("1.3.0");
+    writeFileSync(join(repo, "bun.lock"), text);
+    const o = options(repo);
+    o.toml.security.registry_urls = { npm: "https://mirror.local/npm/{name}" };
+    const urls: string[] = [];
+    const deps = fake((_cmd, args) => {
+      urls.push(args.at(-1) ?? "");
+      return result(0, npmAnswer("1.3.0", "2020-01-01T00:00:00.000Z"));
+    });
+    expect(lockAgeCheck(o, added("bun.lock", text), deps).findings).toEqual([]);
+    expect(urls).toEqual(["https://mirror.local/npm/left-pad"]);
+  });
+
+  test("an ecosystem without a registry is a notice, never a block", () => {
+    const repo = tmp();
+    const text = lock("1.3.0");
+    writeFileSync(join(repo, "bun.lock"), text);
+    const o = options(repo);
+    o.toml.security.registry_urls = { npm: "" };
+    const deps = fake(() => {
+      throw new Error("no registry must mean no call");
+    });
+    const check = lockAgeCheck(o, added("bun.lock", text), deps);
+    expect([check.findings, check.error, check.notices]).toEqual([[], "", ["deps/lock-age: not checked (no registry for npm)"]]);
   });
 
   test("skips uv virtual packages and queries only registry-backed entries", () => {

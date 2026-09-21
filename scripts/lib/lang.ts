@@ -22,9 +22,61 @@ export type LanguageAdapter = {
   dead: ToolAdapter;
   form: ToolAdapter;
   audit: ToolAdapter & { fallback?: string };
-  depAge: { provider: "deps.dev" | "ecosyste.ms"; ecosystem: string; registry?: string };
+  // ecosystem = the deps.dev system name; registry = which package registry answers "published when?".
+  depAge: { provider: "deps.dev" | "ecosyste.ms"; ecosystem: string; registry: RegistryId };
 };
 export type LanguageRoot = { adapter: LanguageAdapter; root: string };
+
+// ---- package registries: one place that knows where a version's publication date comes from.
+// {name}, {version} and {system} are filled in; [security] registry_urls replaces a URL (a mirror),
+// and an empty override means "no registry for this ecosystem" - a notice, never a block.
+
+export type RegistryId = "npm" | "pypi" | "crates" | "go" | "rubygems" | "packagist" | "pub" | "nuget" | "maven" | "deps.dev";
+type Json = any;
+type Registry = { url: string; date: (json: Json, version: string) => string };
+
+const rowDate = (rows: Json, match: (row: Json) => boolean, field: string) => (Array.isArray(rows) ? rows.find(match) : null)?.[field] ?? "";
+
+export const REGISTRIES: Record<RegistryId, Registry> = {
+  npm: { url: "https://registry.npmjs.org/{name}", date: (json, version) => json.time?.[version] ?? "" },
+  pypi: { url: "https://pypi.org/pypi/{name}/{version}/json", date: (json) => (json.urls ?? []).map((item: Json) => item.upload_time_iso_8601).filter(Boolean).sort()[0] ?? "" },
+  crates: { url: "https://crates.io/api/v1/crates/{name}/{version}", date: (json) => json.version?.created_at ?? "" },
+  go: { url: "https://proxy.golang.org/{name}/@v/{version}.info", date: (json) => json.Time ?? "" },
+  rubygems: { url: "https://rubygems.org/api/v1/versions/{name}.json", date: (json, version) => rowDate(json, (row) => row.number === version, "created_at") },
+  packagist: { url: "https://repo.packagist.org/p2/{name}.json", date: (json, version) => rowDate(Object.values(json.packages ?? {})[0], (row) => row.version === version, "time") },
+  pub: { url: "https://pub.dev/api/packages/{name}", date: (json, version) => rowDate(json.versions, (row) => row.version === version, "published") },
+  nuget: { url: "https://api.nuget.org/v3/registration5-gz-semver2/{name}/{version}.json", date: (json) => json.catalogEntry?.published ?? json.published ?? "" },
+  maven: { url: "https://search.maven.org/solrsearch/select?q=a:{artifact}+AND+g:{group}+AND+v:{version}&core=gav&rows=1&wt=json", date: (json) => msDate(json.response?.docs?.[0]?.timestamp) },
+  "deps.dev": { url: "https://api.deps.dev/v3/systems/{system}/packages/{name}/versions/{version}", date: (json) => json.publishedAt ?? "" },
+};
+
+const msDate = (ms: unknown) => (typeof ms === "number" ? new Date(ms).toISOString() : "");
+const REGISTRY_IDS = Object.keys(REGISTRIES);
+
+export function validateRegistryUrls(value: unknown, file: string) {
+  if (!value || typeof value !== "object") return;
+  const bad = Object.keys(value as object).filter((id) => !(id in REGISTRIES));
+  if (bad.length) throw new Error(`${file}: unknown ecosystem(s) in [security] registry_urls: ${bad.join(", ")}; expected ${REGISTRY_IDS.join(", ")}`);
+}
+
+export type RegistryRequest = { registry: string; name: string; version: string; system?: string; urls?: Record<string, string> };
+export type RegistryLookup = { url: string; date: (json: Json) => string };
+
+function fillUrl(template: string, request: RegistryRequest) {
+  const [group, artifact] = request.name.includes(":") ? request.name.split(":") : ["", request.name];
+  const path = (value: string) => encodeURIComponent(value).replace(/%2F/g, "/");
+  const values: Record<string, string> = { name: path(request.name), version: path(request.version), system: path(request.system ?? ""), group: path(group), artifact: path(artifact) };
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? "");
+}
+
+export function registryLookup(request: RegistryRequest): RegistryLookup | null {
+  const known = REGISTRIES[request.registry as RegistryId];
+  if (!known) return null;
+  const override = request.urls?.[request.registry];
+  if (override !== undefined && !override.trim()) return null;
+  const url = fillUrl(override?.trim() || known.url, request);
+  return { url, date: (json: Json) => String(known.date(json, request.version) || "") };
+}
 
 const tool = (name: string, command: string, install: string, format = "json"): ToolAdapter => ({ tool: name, command, install, format });
 
@@ -73,7 +125,7 @@ export const ADAPTERS: LanguageAdapter[] = [
     cycles: tool("dependency-cruiser", "npx dependency-cruiser --output-type json .", "npm install -D dependency-cruiser"),
     dead: tool("knip", "npx knip --reporter json --no-exit-code", "npm install -D knip"),
     form: tool("eslint", "npx eslint --format json .", "npm install -D eslint eslint-plugin-sonarjs"), audit: osv("npm audit --json / bun audit --json"),
-    depAge: { provider: "deps.dev", ecosystem: "NPM" },
+    depAge: { provider: "deps.dev", ecosystem: "NPM", registry: "npm" },
   },
   {
     id: "py", name: "Python", detect: ["pyproject.toml", "setup.py"], extensions: [".py"], lizardLang: "python", prePushTest: PY_PRE_PUSH,
@@ -81,49 +133,49 @@ export const ADAPTERS: LanguageAdapter[] = [
     coverage: tool("pytest-cov", "uv run --with pytest-cov pytest --cov=. --cov-report=lcov:\"$QG_LCOV\"", "uv add --dev pytest pytest-cov", "lcov"),
     cycles: tool("pycycle", "pycycle --here --format json", "uv tool install pycycle"), dead: tool("vulture", "uvx vulture .", "uv tool install vulture", "text"),
     form: tool("ruff/radon", "uvx ruff check --output-format json .", "uv tool install ruff && uv tool install radon"), audit: osv("uvx pip-audit -f json --locked ."),
-    depAge: { provider: "deps.dev", ecosystem: "PYPI" },
+    depAge: { provider: "deps.dev", ecosystem: "PYPI", registry: "pypi" },
   },
   {
     id: "go", name: "Go", detect: ["go.mod"], extensions: [".go"], lizardLang: "go", prePushTest: "",
     testGlobs: ["**/*_test.go"], testPatterns: patterns(["\\bfunc\\s+Test", "\\bt\\.Run\\s*\\("], ["\\b(?:assert|require)\\."], ["\\bt\\.Skip(?:f|Now)?\\s*\\("], [], ["\\bmock\\."]),
     coverage: tool("go test/gcov2lcov", "go test ./... -coverprofile=coverage.out && gcov2lcov -infile coverage.out -outfile \"$QG_LCOV\"", `${installHint("go")} && ${installHint("gcov2lcov")}`, "lcov"),
     cycles: tool("go list", "go list -json ./...", installHint("go")), dead: tool("deadcode", "deadcode -json ./...", installHint("deadcode")),
-    form: tool("gocyclo", "gocyclo -over 10 .", installHint("gocyclo"), "text"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "GO" },
+    form: tool("gocyclo", "gocyclo -over 10 .", installHint("gocyclo"), "text"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "GO", registry: "go" },
   },
   {
     id: "rust", name: "Rust", detect: ["Cargo.toml"], extensions: [".rs"], lizardLang: "rust", prePushTest: "",
     testGlobs: ["**/tests/**/*.rs", "**/*_test.rs"], testPatterns: patterns(["#\\[test\\]"], ["\\bassert(?:_eq|_ne)?!\\s*\\("], ["#\\[ignore"], [], ["\\bmockall\\b", "\\bmock!\\s*\\{"]),
     coverage: tool("cargo-llvm-cov", "cargo llvm-cov --lcov --output-path \"$QG_LCOV\"", "cargo install cargo-llvm-cov", "lcov"),
     cycles: tool("cargo-modules", "cargo modules dependencies --lib", "cargo install cargo-modules", "text"), dead: tool("cargo-machete", "cargo machete --json", "cargo install cargo-machete"),
-    form: tool("cargo clippy", "cargo clippy --message-format=json", "rustup component add clippy", "jsonl"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "CARGO" },
+    form: tool("cargo clippy", "cargo clippy --message-format=json", "rustup component add clippy", "jsonl"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "CARGO", registry: "crates" },
   },
   {
     id: "java", name: "Java", detect: ["pom.xml", "build.gradle"], extensions: [".java"], lizardLang: "java", prePushTest: "",
     testGlobs: ["**/src/test/**/*.java", "**/*Test.java"], testPatterns: patterns(["@Test"], ["\\bassert[A-Z]\\w*\\s*\\("], ["@Disabled", "@Ignore"], [], ["\\bMockito\\.", "@Mock"]),
     coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:$QG_DIR/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
     cycles: tool("jdeps", "jdeps -dotoutput $QG_DIR/jdeps -verbose:class .", "install JDK 21", "dot"), dead: tool("PMD", "pmd check -d . -R category/java/bestpractices.xml -f sarif", installHint("pmd"), "sarif"),
-    form: tool("PMD", "pmd check -d . -R category/java/design.xml -f sarif", installHint("pmd"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
+    form: tool("PMD", "pmd check -d . -R category/java/design.xml -f sarif", installHint("pmd"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN", registry: "maven" },
   },
   {
     id: "kotlin", name: "Kotlin", detect: ["build.gradle.kts"], extensions: [".kt", ".kts"], lizardLang: "kotlin", prePushTest: "",
     testGlobs: ["**/src/test/**/*.kt", "**/*Test.kt"], testPatterns: patterns(["@Test"], ["\\bassert[A-Z]\\w*\\s*\\("], ["@Disabled", "@Ignore"], [], ["\\bmockk\\s*\\(", "@MockK"]),
     coverage: tool("JaCoCo/ReportGenerator", "reportgenerator -reports:**/jacoco.xml -targetdir:$QG_DIR/jacoco -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
     cycles: tool("Konsist", "./gradlew konsistTest", "add Konsist or ArchUnit tests", "text"), dead: tool("detekt", "detekt --report sarif:$QG_DIR/detekt.sarif", installHint("detekt"), "sarif"),
-    form: tool("detekt", "detekt --report sarif:$QG_DIR/detekt.sarif", installHint("detekt"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN" },
+    form: tool("detekt", "detekt --report sarif:$QG_DIR/detekt.sarif", installHint("detekt"), "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "MAVEN", registry: "maven" },
   },
   {
     id: "csharp", name: "C#", detect: ["*.csproj", "*.sln"], extensions: [".cs"], lizardLang: "csharp", prePushTest: "",
     testGlobs: ["**/*Tests.cs", "**/*Test.cs"], testPatterns: patterns(["\\[(?:Fact|Theory|Test)\\]"], ["\\bAssert\\."], ["\\bSkip\\s*=", "\\[Ignore"], [], ["\\bMock<", "\\bSubstitute\\."]),
     coverage: tool("Coverlet", "dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=lcov", "dotnet add package coverlet.msbuild", "lcov"),
     cycles: tool("Roslyn analyzers", "dotnet build", "install .NET SDK and architecture analyzers", "sarif"), dead: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=$QG_DIR/roslyn.sarif", "install .NET SDK", "sarif"),
-    form: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=$QG_DIR/roslyn.sarif", "install .NET SDK", "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "NUGET" },
+    form: tool("Roslyn analyzers", "dotnet build /p:ErrorLog=$QG_DIR/roslyn.sarif", "install .NET SDK", "sarif"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "NUGET", registry: "nuget" },
   },
   {
     id: "swift", name: "Swift", detect: ["Package.swift"], extensions: [".swift"], lizardLang: "swift", prePushTest: "",
     testGlobs: ["**/Tests/**/*.swift", "**/*Tests.swift"], testPatterns: patterns(["\\bfunc\\s+test"], ["\\bXCTAssert"], ["\\bXCTSkip"], [], ["\\bMock\\w+"]),
     coverage: tool("xccov2lcov", "xcrun xccov view --report --json .build/*.xcresult | xccov2lcov > \"$QG_LCOV\"", installHint("xccov2lcov"), "lcov"),
     cycles: tool("swift package", "swift package show-dependencies --format json", "install Xcode command-line tools"), dead: tool("periphery", "periphery scan --format json", installHint("periphery")),
-    form: tool("SwiftLint", "swiftlint lint --reporter json", installHint("swiftlint")), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "swiftpm", registry: "swift" },
+    form: tool("SwiftLint", "swiftlint lint --reporter json", installHint("swiftlint")), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "swiftpm", registry: "deps.dev" },
   },
   {
     id: "php", name: "PHP", detect: ["composer.json"], extensions: [".php"], lizardLang: "php", prePushTest: "",
@@ -137,21 +189,21 @@ export const ADAPTERS: LanguageAdapter[] = [
     testGlobs: ["**/spec/**/*_spec.rb", "**/test/**/*_test.rb"], testPatterns: patterns(["\\bit\\s*(?:\\(|[\"'])", "\\btest\\s+[\"']"], ["\\bexpect\\s*\\(", "\\bassert"], ["\\bskip\\b", "xit\\s*\\("], ["fit\\s*\\(", "focus:\\s*true"], ["allow\\s*\\(", "instance_double\\s*\\("]),
     coverage: tool("simplecov-lcov", "bundle exec ruby -Itest && cp coverage/lcov/*.lcov \"$QG_LCOV\"", "bundle add simplecov-lcov --group test", "lcov"),
     cycles: tool("Packwerk", "bundle exec packwerk check", "bundle add packwerk --group development", "text"), dead: tool("RuboCop", "bundle exec rubocop --format json", "bundle add rubocop --group development,test"),
-    form: tool("RuboCop", "bundle exec rubocop --format json", "bundle add rubocop --group development,test"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "RUBYGEMS" },
+    form: tool("RuboCop", "bundle exec rubocop --format json", "bundle add rubocop --group development,test"), audit: osv(), depAge: { provider: "deps.dev", ecosystem: "RUBYGEMS", registry: "rubygems" },
   },
   {
     id: "cpp", name: "C/C++", detect: ["CMakeLists.txt", "Makefile"], extensions: [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"], lizardLang: "cpp", prePushTest: "",
     testGlobs: ["**/test/**/*.{c,cc,cpp,cxx}", "**/*_test.{c,cc,cpp,cxx}"], testPatterns: patterns(["\\bTEST(?:_F|_P)?\\s*\\("], ["\\b(?:EXPECT|ASSERT)_"], ["\\bGTEST_SKIP\\s*\\("], ["DISABLED_"], ["\\bMOCK_METHOD\\s*\\("]),
     coverage: tool("gcov/ReportGenerator", "reportgenerator -reports:**/*.gcov.xml -targetdir:$QG_DIR/cpp -reporttypes:lcov", installHint("reportgenerator"), "lcov"),
     cycles: tool("include-what-you-use", "include-what-you-use .", installHint("include-what-you-use"), "text"), dead: tool("clang-tidy", "clang-tidy -checks=misc-unused-*", installHint("clang-tidy"), "yaml"),
-    form: tool("clang-tidy", "clang-tidy -checks=readability-function-cognitive-complexity", installHint("clang-tidy"), "yaml"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "conan", registry: "conan-center" },
+    form: tool("clang-tidy", "clang-tidy -checks=readability-function-cognitive-complexity", installHint("clang-tidy"), "yaml"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "conan", registry: "deps.dev" },
   },
   {
     id: "dart", name: "Dart", detect: ["pubspec.yaml"], extensions: [".dart"], lizardLang: null, prePushTest: "",
     testGlobs: ["**/test/**/*_test.dart"], testPatterns: patterns(["\\btest\\s*\\("], ["\\bexpect\\s*\\("], ["skip\\s*:"], ["solo_test\\s*\\("], ["registerFallbackValue\\s*\\(", "when\\s*\\("]),
     coverage: tool("coverage:format_coverage", "dart test --coverage=$QG_DIR/dart && format_coverage --lcov --in=$QG_DIR/dart --out=\"$QG_LCOV\" --packages=.dart_tool/package_config.json --report-on=lib", "dart pub global activate coverage", "lcov"),
     cycles: tool("dart analyze", "dart analyze --format=json", "install Dart SDK", "json"), dead: tool("dart analyze", "dart analyze --format=json", "install Dart SDK", "json"),
-    form: tool("dart_code_metrics", "dart run dart_code_metrics:metrics analyze lib --reporter=json", "dart pub add --dev dart_code_metrics", "json"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "pub", registry: "pub.dev" },
+    form: tool("dart_code_metrics", "dart run dart_code_metrics:metrics analyze lib --reporter=json", "dart pub add --dev dart_code_metrics", "json"), audit: osv(), depAge: { provider: "ecosyste.ms", ecosystem: "pub", registry: "pub" },
   },
 ];
 

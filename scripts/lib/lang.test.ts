@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { type Opts } from "./config.ts";
 import { WHOLE, type Changes } from "./diff.ts";
 import { testHunks } from "./jev.ts";
-import { ADAPTERS, adapterById, adapterForFile, detectLanguageRoots, isTestFile, matchesTestPattern } from "./lang.ts";
+import { ADAPTERS, adapterById, adapterForFile, detectLanguageRoots, isTestFile, matchesTestPattern, REGISTRIES, registryLookup } from "./lang.ts";
 
 const dirs: string[] = [];
 
@@ -98,5 +98,48 @@ describe("language adapters", () => {
     const ch: Changes = new Map([["pkg/value_test.go", diff]]);
     const hunks = testHunks({ langs: [{ adapter, root: "." }], scope: { kind: "all" } } as Opts, ch);
     expect(hunks.map((hunk) => hunk.file)).toEqual(["pkg/value_test.go"]);
+  });
+});
+
+describe("package registries", () => {
+  const sample: Record<string, [string, unknown, string]> = {
+    npm: ["left-pad", { time: { "1.3.0": "2020-01-01T00:00:00.000Z" } }, "2020-01-01T00:00:00.000Z"],
+    pypi: ["requests", { urls: [{ upload_time_iso_8601: "2020-01-01T00:00:00.000Z" }] }, "2020-01-01T00:00:00.000Z"],
+    crates: ["serde", { version: { created_at: "2020-01-01T00:00:00.000Z" } }, "2020-01-01T00:00:00.000Z"],
+    go: ["github.com/a/b", { Version: "v1.3.0", Time: "2020-01-01T00:00:00Z" }, "2020-01-01T00:00:00Z"],
+    rubygems: ["rails", [{ number: "1.3.0", created_at: "2020-01-01T00:00:00.000Z" }], "2020-01-01T00:00:00.000Z"],
+    packagist: ["acme/lib", { packages: { "acme/lib": [{ version: "1.3.0", time: "2020-01-01T00:00:00+00:00" }] } }, "2020-01-01T00:00:00+00:00"],
+    pub: ["http", { versions: [{ version: "1.3.0", published: "2020-01-01T00:00:00.000Z" }] }, "2020-01-01T00:00:00.000Z"],
+    nuget: ["Newtonsoft.Json", { catalogEntry: { published: "2020-01-01T00:00:00.000Z" } }, "2020-01-01T00:00:00.000Z"],
+    maven: ["com.acme:lib", { response: { docs: [{ timestamp: 1577836800000 }] } }, "2020-01-01T00:00:00.000Z"],
+    "deps.dev": ["left-pad", { publishedAt: "2020-01-01T00:00:00.000Z" }, "2020-01-01T00:00:00.000Z"],
+  };
+
+  test("every ecosystem has a URL template and reads the publication time from it", () => {
+    for (const [id, [name, json, expected]] of Object.entries(sample)) {
+      const lookup = registryLookup({ registry: id, name, version: "1.3.0", system: "NPM" })!;
+      const parts = name.split(":").map((part) => encodeURIComponent(part).replace(/%2F/g, "/"));
+      expect([id, lookup.url.includes("{"), parts.every((part) => lookup.url.includes(part))]).toEqual([id, false, true]);
+      expect([id, lookup.date(json)]).toEqual([id, expected]);
+    }
+  });
+
+  test("the go proxy and deps.dev carry version and system in the path", () => {
+    expect(registryLookup({ registry: "go", name: "github.com/a/b", version: "v1.3.0" })!.url).toBe("https://proxy.golang.org/github.com/a/b/@v/v1.3.0.info");
+    expect(registryLookup({ registry: "deps.dev", name: "left-pad", version: "1.3.0", system: "NPM" })!.url).toContain("/systems/NPM/packages/left-pad/versions/1.3.0");
+  });
+
+  test("an unknown or disabled ecosystem has no lookup", () => {
+    expect(registryLookup({ registry: "conan", name: "zlib", version: "1.3.0" })).toBeNull();
+    expect(registryLookup({ registry: "npm", name: "left-pad", version: "1.3.0", urls: { npm: "" } })).toBeNull();
+  });
+
+  test("[security] registry_urls points an ecosystem at a mirror", () => {
+    const lookup = registryLookup({ registry: "npm", name: "left-pad", version: "1.3.0", urls: { npm: "https://mirror.local/npm/{name}" } })!;
+    expect(lookup.url).toBe("https://mirror.local/npm/left-pad");
+  });
+
+  test("every language adapter names a registry that exists", () => {
+    for (const adapter of ADAPTERS) expect([adapter.id, adapter.depAge.registry in REGISTRIES]).toEqual([adapter.id, true]);
   });
 });

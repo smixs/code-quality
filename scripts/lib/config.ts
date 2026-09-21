@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { adapterById, detectLanguageRoots } from "./lang.ts";
+import { adapterById, detectLanguageRoots, validateRegistryUrls } from "./lang.ts";
 import { validateToolOverrides } from "./tools.ts";
 import { mainCheckout, run, splitList } from "./util.ts";
 
@@ -33,7 +33,8 @@ export const DEFAULTS = {
   docs: { globs: ["*.md", "docs/**/*.md"], history_globs: ["docs/adr/**", "CHANGELOG.md", "**/CHANGELOG.md"] },
   escalate: { paths: [] as string[] },
   secrets: { allow_users: [] as string[] },
-  security: { gitleaks: true, audit: true },
+  // registry_urls: ecosystem -> URL template for the lock-age lookup (a mirror; "" = no registry).
+  security: { gitleaks: true, audit: true, registry_urls: {} as Record<string, string> },
   hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40 },
   // Jev notes never block (owner decision 3). The first two questions and thresholds are from pilot 2 (18.09.2026).
   review: {
@@ -97,6 +98,7 @@ function validate(t: Record<string, any>, file: string) {
     if (bad.length) throw new Error(`${file}: unknown key(s) in [${section}]: ${bad.join(", ")}`);
   }
   validateToolOverrides(t.tools, file);
+  validateRegistryUrls(t.security?.registry_urls, file);
   validateLanguages(t.project?.language, file);
 }
 
