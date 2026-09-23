@@ -1,5 +1,5 @@
 // Runs language-adapter commands and converts their output to the gate's common Finding shape.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import type { LanguageRoot, ToolAdapter } from "./lang.ts";
@@ -179,12 +179,53 @@ function parsedCheck(request: RunRequest, name: string, cwd: string, result: Too
   const { o, root, kind, tool } = request;
   try {
     const output = adapterOutput(tool, result.out, cwd, request.env?.QG_DIR ?? o.out);
-    const findings = parseAdapterOutput({ adapter: root.adapter.id, kind, tool, output, repo: o.repo, cwd });
+    const normal = parseAdapterOutput({ adapter: root.adapter.id, kind, tool, output, repo: o.repo, cwd });
+    const recovered = root.adapter.id === "go" && kind === "form" ? unsuppressedGocyclo(request, cwd) : [];
+    const findings = uniqueFindings([...normal, ...recovered]);
     if (acceptedResult(kind, result.code, findings)) return tagged(root.adapter.id, kind, check(name, findings));
     return tagged(root.adapter.id, kind, check(name, [], `${tool.tool} exit ${result.code}: ${shortError(result.err || result.out)}`));
   } catch (error) {
     return tagged(root.adapter.id, kind, check(name, [], `${tool.tool}: ${(error as Error).message}`));
   }
+}
+
+// gocyclo's //gocyclo:ignore removes a function from its output. Recheck only files with that
+// directive through a temporary copy; the ordinary scan still owns every other file.
+function unsuppressedGocyclo(request: RunRequest, cwd: string): Finding[] {
+  const { o, runner, env } = request;
+  const listed = run("git", ["-c", "core.quotePath=false", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], o.repo);
+  if (listed.code !== 0) throw new Error(`gocyclo source list: ${shortError(listed.err)}`);
+  const copy = { dir: "", aliases: new Map<string, string>() };
+  try {
+    for (const file of listed.out.split("\0").filter((name) => name.endsWith(".go"))) {
+      copyGocycloSource(o, cwd, file, copy);
+    }
+    if (!copy.dir) return [];
+    const files = [...copy.aliases.keys()].map((file) => join(copy.dir, file));
+    const result = runner("gocyclo", ["-over", "10", ...files], cwd, { timeout: 600_000, env });
+    const findings = parseGocyclo(result.out, { repo: copy.dir, cwd: copy.dir }).map((item) => ({ ...item, file: copy.aliases.get(item.file) ?? item.file }));
+    if (!acceptedResult("form", result.code, findings)) throw new Error(`gocyclo recheck exit ${result.code}: ${shortError(result.err || result.out)}`);
+    return findings;
+  } finally {
+    if (copy.dir) rmSync(copy.dir, { recursive: true, force: true });
+  }
+}
+
+function copyGocycloSource(o: Opts, cwd: string, file: string, copy: { dir: string; aliases: Map<string, string> }) {
+  const original = join(o.repo, file);
+  const withinRoot = relative(cwd, original);
+  if (withinRoot.startsWith("..") || isAbsolute(withinRoot) || !existsSync(original)) return;
+  const source = readFileSync(original, "utf8");
+  const neutral = source.replace(/^([ \t]*\/\/[ \t]*)gocyclo:ignore\b/gm, "$1gocyclo:xxxxxx");
+  if (neutral === source) return;
+  if (!copy.dir) {
+    mkdirSync(o.out, { recursive: true });
+    copy.dir = mkdtempSync(join(o.out, "gocyclo-scan-"));
+  }
+  const target = join(copy.dir, withinRoot);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, neutral);
+  copy.aliases.set(withinRoot, file);
 }
 
 function acceptedResult(kind: AdapterToolKind, code: number, findings: Finding[]) {

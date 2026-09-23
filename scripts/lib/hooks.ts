@@ -1,6 +1,7 @@
 // git hooks (pre-commit, commit-msg, pre-push), hook install/uninstall and the agent Stop contract.
 // Every entry point runs the same analysis; vendors only differ in how they call this file.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
 import { type Args, buildOpts, CONFIG_FILE, DEFAULTS, type Opts, readArgs, repoConfigFile } from "./config.ts";
 import { runTests } from "./crap.ts";
@@ -15,7 +16,15 @@ import { isProjectSource, tamperCheck } from "./tamper.ts";
 import { commitMsgFindings } from "./text.ts";
 import { bypassNote, check, type Check, emptyTree, findingLine, git, gitPaths, lines, notedCheck, refuse, run } from "./util.ts";
 
-export const HOOKS_DIR = resolve(import.meta.dir, "../../hooks");
+export const SOURCE_HOOKS_DIR = resolve(import.meta.dir, "../../git-hooks");
+export const LEGACY_HOOKS_DIR = resolve(import.meta.dir, "../../hooks");
+export const pluginHome = () => resolve(process.env.CODE_QUALITY_HOME || join(homedir(), ".local/share/code-quality"));
+export const hooksDir = () => join(pluginHome(), "git-hooks");
+export function updatePluginRoot() {
+  const home = pluginHome();
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "root"), resolve(import.meta.dir, "../..") + "\n");
+}
 const ZERO = /^0+$/;
 
 // ---- check: deterministic gate on the current change (seconds)
@@ -241,8 +250,8 @@ export async function runHook(args: Args) {
 }
 
 // ---- install / uninstall: core.hooksPath for this repo only
-// Setting core.hooksPath hides the repo's own hooks (Git LFS, husky, ...), so every wrapper in hooks/
-// chains to the hook git would have run (hooks/_chain). A previous core.hooksPath (husky's .husky/_)
+// Setting core.hooksPath hides the repo's own hooks (Git LFS, husky, ...), so every wrapper in git-hooks/
+// chains to the hook git would have run (_chain). A previous core.hooksPath (husky's .husky/_)
 // is kept in code-quality.previousHooksPath: _chain runs hooks from there, uninstall restores it.
 
 export const PREV_KEY = "code-quality.previousHooksPath";
@@ -260,9 +269,12 @@ function repoRoot(path: string | undefined) {
 export function installHooks(path: string | undefined) {
   const repo = repoRoot(path);
   const cur = localConfig(repo, "core.hooksPath");
-  if (cur && cur !== HOOKS_DIR) git(repo, "config", "--local", PREV_KEY, cur);
-  git(repo, "config", "--local", "core.hooksPath", HOOKS_DIR);
-  console.log([`hooks installed: ${repo} core.hooksPath=${HOOKS_DIR}`, chainNote(repo), ...installNotes(repo)].join("\n"));
+  const target = hooksDir();
+  if (cur && cur !== target && cur !== LEGACY_HOOKS_DIR) git(repo, "config", "--local", PREV_KEY, cur);
+  mkdirSync(pluginHome(), { recursive: true });
+  cpSync(SOURCE_HOOKS_DIR, target, { recursive: true, force: true });
+  git(repo, "config", "--local", "core.hooksPath", target);
+  console.log([`hooks installed: ${repo} core.hooksPath=${target}`, chainNote(repo), ...installNotes(repo)].join("\n"));
 }
 
 // The directory _chain reads: the recorded previous core.hooksPath, else a --global/--system
@@ -277,7 +289,7 @@ const executable = (path: string) => existsSync(path) && statSync(path).isFile()
 
 function chainNote(repo: string) {
   const dir = chainDir(repo);
-  const own = existsSync(dir) ? readdirSync(dir).filter((f) => existsSync(join(HOOKS_DIR, f)) && executable(join(dir, f))) : [];
+  const own = existsSync(dir) ? readdirSync(dir).filter((f) => existsSync(join(hooksDir(), f)) && executable(join(dir, f))) : [];
   return `chained repo hooks from ${dir}: ${own.length ? own.join(", ") : "none"}`;
 }
 
@@ -295,7 +307,7 @@ function installNotes(repo: string) {
 export function uninstallHooks(path: string | undefined) {
   const repo = repoRoot(path);
   const cur = localConfig(repo, "core.hooksPath");
-  if (cur !== HOOKS_DIR) return console.log(`nothing to do: core.hooksPath is ${cur || "unset"}${dropStalePrevious(repo)}`);
+  if (cur !== hooksDir() && cur !== LEGACY_HOOKS_DIR) return console.log(`nothing to do: core.hooksPath is ${cur || "unset"}${dropStalePrevious(repo)}`);
   console.log(`hooks removed: ${repo}${restorePrevious(repo)}`);
 }
 
@@ -325,10 +337,13 @@ function restorePrevious(repo: string) {
 function stopInput() {
   const raw = readFileSync(0, "utf8");
   try {
-    return JSON.parse(raw);
+    const input = JSON.parse(raw);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("expected object");
+    return input;
   } catch {
     // Exit 1, not 2: for Claude Code exit 2 means "block", and a broken caller would trap the agent.
-    console.error(`agent-stop: stdin is not the Stop hook JSON: ${raw.slice(0, 120)}`);
+    console.log(JSON.stringify({ systemMessage: "code-quality Stop hook received invalid JSON input" }));
+    console.error("agent-stop: stdin is not the Stop hook JSON");
     process.exit(1);
   }
 }
@@ -402,11 +417,17 @@ function stopState(args: Args, repo: string): StopState {
 }
 
 export async function agentStop(args: Args) {
-  const input = stopInput();
-  const session = input.session_id ?? "";
-  const state = stopState(args, stopRepo(input.cwd ?? process.cwd()));
-  const r = await stopResult(args, state, session);
-  console.log(JSON.stringify(r.ok ? {} : redAnswer(state, session, r)));
+  try {
+    const input = stopInput();
+    const session = input.session_id ?? input.sessionId ?? "";
+    if (typeof session !== "string" || !session.trim()) throw new Error("missing session_id/sessionId");
+    const state = stopState(args, stopRepo(input.cwd ?? process.cwd()));
+    const r = await stopResult(args, state, session);
+    console.log(JSON.stringify(r.ok ? {} : redAnswer(state, session, r)));
+  } catch (error) {
+    console.log(JSON.stringify({ systemMessage: `code-quality Stop hook failed: ${(error as Error).message}` }));
+    process.exit(1);
+  }
 }
 
 async function stopResult(args: Args, state: StopState, session: string): Promise<Verdict> {

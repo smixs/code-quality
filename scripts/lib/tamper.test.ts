@@ -53,6 +53,79 @@ function tamper(repo: string) {
 
 const rules = (repo: string) => tamper(repo).findings.map((f) => f.rule);
 
+describe("tamper/inline-suppression", () => {
+  for (const [file, line] of [["evidence-eslint-disable-codex.ts", 1], ["evidence-eslint-disable-next-line.ts", 1]] as const) {
+    test(`flags ${file} at its added directive`, () => {
+      const repo = tsRepo();
+      write(repo, "src/value.ts", readFileSync(join(import.meta.dir, "../fixtures", file), "utf8"));
+      git(repo, "add", "-A");
+      expect(tamper(repo).findings).toContainEqual(expect.objectContaining({ rule: "tamper/inline-suppression", file: "src/value.ts", line }));
+    });
+  }
+
+  test("ignores unrelated ESLint rules and a directive inside a string", () => {
+    const repo = tsRepo();
+    write(repo, "src/value.ts", "// eslint-disable no-console\nexport const text = '// eslint-disable complexity';\nexport const template = `// eslint-disable max-depth`;\n");
+    git(repo, "add", "-A");
+    expect(rules(repo)).not.toContain("tamper/inline-suppression");
+  });
+
+  test("flags a multiline block directive, a trailing directive, and a blanket disable", () => {
+    const repo = tsRepo();
+    write(repo, "src/value.ts", "/*\n * eslint-disable complexity\n */\nexport const a = 1; // eslint-disable-line max-depth\n// eslint-disable -- all rules\n");
+    git(repo, "add", "-A");
+    expect(tamper(repo).findings.filter((item) => item.rule === "tamper/inline-suppression").map((item) => item.line)).toEqual([2, 4, 5]);
+  });
+
+  test("does not flag an old directive when only code changes", () => {
+    const repo = tsRepo({ "src/value.ts": "// eslint-disable complexity\nexport const value = 1;\n" });
+    write(repo, "src/value.ts", "// eslint-disable complexity\nexport const value = 2;\n");
+    git(repo, "add", "-A");
+    expect(rules(repo)).not.toContain("tamper/inline-suppression");
+  });
+
+  test("flags a new ast-grep suppression comment", () => {
+    const repo = tsRepo();
+    write(repo, "src/value.ts", "// ast-grep-ignore: empty-catch\nexport const value = 1;\n");
+    git(repo, "add", "-A");
+    expect(rules(repo)).toContain("tamper/inline-suppression");
+  });
+
+  for (const [language, manifest, file, directive] of [
+    ["py", "pyproject.toml", "src/value.py", "# noqa: F821"],
+    ["py", "pyproject.toml", "src/value.py", "# ruff: noqa"],
+    ["go", "go.mod", "src/value.go", "//gocyclo:ignore"],
+    ["go", "go.mod", "src/value.go", "//nolint:gocyclo"],
+  ] as const) {
+    test(`flags ${language} ${directive}`, () => {
+      const repo = tsRepo();
+      write(repo, ".quality.toml", `[project]\nlanguage = "${language}"\nsrc = ["src"]\nbase = "HEAD"\n`);
+      write(repo, manifest, language === "go" ? "module example.test/rules\n" : '[project]\nname = "rules"\nversion = "0.1.0"\n');
+      write(repo, file, `${directive}\n`);
+      git(repo, "add", "-A");
+      expect(rules(repo)).toContain("tamper/inline-suppression");
+    });
+  }
+
+  test("allows an unrelated Go nolint rule", () => {
+    const repo = tsRepo();
+    write(repo, ".quality.toml", '[project]\nlanguage = "go"\nsrc = ["src"]\nbase = "HEAD"\n');
+    write(repo, "go.mod", "module example.test/rules\n");
+    write(repo, "src/value.go", "package rules\n//nolint:errcheck\nfunc value() int { return 1 }\n");
+    git(repo, "add", "-A");
+    expect(rules(repo)).not.toContain("tamper/inline-suppression");
+  });
+
+  test("ignores noqa text inside a Python docstring", () => {
+    const repo = tsRepo();
+    write(repo, ".quality.toml", '[project]\nlanguage = "py"\nsrc = ["src"]\nbase = "HEAD"\n');
+    write(repo, "pyproject.toml", '[project]\nname = "rules"\nversion = "0.1.0"\n');
+    write(repo, "src/value.py", '"""\n# noqa: F821\n"""\nvalue = 1\n');
+    git(repo, "add", "-A");
+    expect(rules(repo)).not.toContain("tamper/inline-suppression");
+  });
+});
+
 describe("tamper/test-deleted", () => {
   test("blocks a test-only block deletion from the T1 eval", () => {
     const repo = tsRepo({

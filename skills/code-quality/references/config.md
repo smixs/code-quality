@@ -58,7 +58,7 @@ The list of guarded keys and the rule for changing them together with sources is
 ## Git hooks
 
 
-`install-hooks <repo>` writes `core.hooksPath` into the repo's `.git/config`. The repo's own hooks (Git LFS, husky, anything else) keep working: every wrapper calls the previous hook with the same arguments and returns its exit code. `uninstall-hooks <repo>` puts the old value back.
+`install-hooks <repo>` writes a stable `core.hooksPath` under `~/.local/share/code-quality/git-hooks/` (override with `CODE_QUALITY_HOME`). A root pointer in that directory follows the currently loaded plugin version. The repo's own hooks (Git LFS, husky, anything else) keep working: every wrapper calls the previous hook with the same arguments and returns its exit code. `uninstall-hooks <repo>` puts the old value back. `[hooks] block_bypass = false` disables the agent shell guard; the default is `true`.
 
 ## Stop hooks
 
@@ -68,4 +68,4 @@ The git hooks catch commits. The Stop hooks catch the state before a commit: whe
 - Codex: one more group in `hooks.Stop` of `~/.codex/hooks.json`, then trust it through `/hooks`;
 - pi: an extension on `agent_settled`, one follow-up message per chain.
 
-A red gate returns `{"decision": "block", "reason": ...}` and the agent gets one round of fixes. The same red verdict a second time in the same session returns a `systemMessage` instead of another block, so the loop is bounded. Snippets: [adapters/ENABLE.md](../adapters/ENABLE.md).
+A red gate returns `{"decision": "block", "reason": ...}` and the agent gets one round of fixes. The same red verdict a second time in the same session returns a `systemMessage` instead of another block, so the loop is bounded. Plugin hook definitions are in [hooks/hooks.json](../../../hooks/hooks.json).

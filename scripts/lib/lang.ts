@@ -132,7 +132,7 @@ export const ADAPTERS: LanguageAdapter[] = [
     testGlobs: ["**/test_*.py", "**/*_test.py"], testPatterns: PY_TEST,
     coverage: tool("pytest-cov", "uv run --with pytest-cov pytest --cov=. --cov-report=lcov:\"$QG_LCOV\"", "uv add --dev pytest pytest-cov", "lcov"),
     cycles: tool("pycycle", "pycycle --here --format json", "uv tool install pycycle"), dead: tool("vulture", "uvx vulture .", "uv tool install vulture", "text"),
-    form: tool("ruff/radon", "uvx ruff check --output-format json .", "uv tool install ruff && uv tool install radon"), audit: osv("uvx pip-audit -f json --locked ."),
+    form: tool("ruff/radon", "uvx ruff check --ignore-noqa --output-format json .", "uv tool install ruff && uv tool install radon"), audit: osv("uvx pip-audit -f json --locked ."),
     depAge: { provider: "deps.dev", ecosystem: "PYPI", registry: "pypi" },
   },
   {

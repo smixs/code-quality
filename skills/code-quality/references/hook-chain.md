@@ -1,6 +1,6 @@
 # The repo's own hooks: the chain
 
-`core.hooksPath` hides the hooks in `.git/hooks`, so every file in `hooks/` calls `hooks/_chain` at the
+`core.hooksPath` hides the hooks in `.git/hooks`, so every shim in `~/.local/share/code-quality/git-hooks/` calls `_chain` at the
 end: that runs the repo's hook of the same name, with the same arguments and the same stdin, and
 returns its exit code. The repo's hook is looked up where git would look without the skill:
 
@@ -28,7 +28,7 @@ runs `.husky/pre-commit`, and `uninstall-hooks` restores `.husky/_`. Tests: `pip
 block `install-hooks chains the repo's own hooks` (including a `--global` `core.hooksPath`).
 Repeat on 19.09.2026 in a scratch clone of another repo with `lfs.url=file://<bare>`: a commit with
 complexity 12 was stopped, a clean first commit went through, `git-lfs pre-push` was called through
-`hooks/pre-push`, the object landed in `lfs/objects` of the local bare repo, and the push log held no
+`git-hooks/pre-push`, the object landed in `lfs/objects` of the local bare repo, and the push log held no
 `https://` at all.
 
 The first commit of a repo without history is judged against an empty tree: git 2.55 does not know the

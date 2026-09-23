@@ -4,13 +4,16 @@
 //
 //   quality.ts [flags]                    full gate: tests with coverage + every check (minutes)
 //   quality.ts check [--staged|--since R|--all]   deterministic gate on the change (seconds)
-//   quality.ts hook pre-commit|commit-msg <file>|pre-push   called by hooks/*
+//   quality.ts hook pre-commit|commit-msg <file>|pre-push   called by git-hooks/*
 //   quality.ts install-hooks <repo> | uninstall-hooks <repo>
+//   quality.ts install-grok-hooks | uninstall-grok-hooks
 //   quality.ts agent-stop                 Stop hook contract (stdin JSON -> stdout JSON)
 import { type Args, buildOpts, readArgs, repoConfigFile } from "./lib/config.ts";
 import type { Coverage } from "./lib/crap.ts";
 import { analyze, gate, writeBaseline } from "./lib/gate.ts";
-import { agentStop, installHooks, runCheck, runHook, uninstallHooks } from "./lib/hooks.ts";
+import { agentStop, installHooks, runCheck, runHook, uninstallHooks, updatePluginRoot } from "./lib/hooks.ts";
+import { guardBash } from "./lib/guard-bash.ts";
+import { installGrokHooks, uninstallGrokHooks } from "./lib/grok-hooks.ts";
 import { checkNotices, churn, failCount, testsLine, verdictText, worklist, writeReport } from "./lib/report.ts";
 import { riskCrap } from "./lib/crap.ts";
 
@@ -49,11 +52,15 @@ const COMMANDS: Record<string, (a: Args) => void | Promise<void>> = {
   check: checkCmd,
   hook: runHook,
   "agent-stop": agentStop,
+  "guard-bash": guardBash,
   "install-hooks": (a) => installHooks(a.positionals[1]),
   "uninstall-hooks": (a) => uninstallHooks(a.positionals[1]),
+  "install-grok-hooks": installGrokHooks,
+  "uninstall-grok-hooks": uninstallGrokHooks,
 };
 
 async function main() {
+  updatePluginRoot();
   const args = readArgs();
   const cmd = args.positionals[0];
   if (!cmd) return full(args);

@@ -1,6 +1,6 @@
 // ast-grep structural rules on changed files, plus optional non-blocking Semgrep security notes.
-import { existsSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, isTouched } from "./diff.ts";
 import { adapterForFile, type LanguageAdapter, type LanguageId } from "./lang.ts";
@@ -10,6 +10,7 @@ import { check, type Finding, notedCheck, run } from "./util.ts";
 const SG_CONFIG = join(import.meta.dir, "../../rules/sgconfig.yml");
 const SEMGREP_CONFIG = join(import.meta.dir, "../../rules/semgrep.yml");
 const SKIP = /(^|\/)(node_modules|fixtures|\.scratch|dist|build|target|\.venv)\//;
+const SUPPRESSION = /((?:\/\/|#|\/\*|\*)[ \t]*)ast-grep-ignore\b/g;
 
 type AstSpec = { language: string; root: string; catchKind?: string; empty: string; logs: string };
 
@@ -66,8 +67,9 @@ function sgCommand(o: Opts): [string, string[]] {
   return ["npx", ["-y", "-p", spec, "ast-grep"]];
 }
 
-function findingOf(match: any, ch: Changes, repo: string): Finding | null {
-  const file = isAbsolute(match.file) ? relative(repo, match.file) : match.file;
+function findingOf(match: any, ch: Changes, repo: string, aliases: Map<string, string>): Finding | null {
+  const scanned = isAbsolute(match.file) ? relative(repo, match.file) : match.file.replace(/^\.\//, "");
+  const file = aliases.get(scanned) ?? scanned;
   const line = match.range.start.line + 1;
   if (!isTouched(ch.get(file), line, match.range.end.line + 1)) return null;
   return { rule: `ast/${match.ruleId}`, file, line, msg: match.message };
@@ -81,19 +83,47 @@ function parseMatches(text: string) {
 
 type AstContext = { o: Opts; ch: Changes; adapter: LanguageAdapter; files: string[]; command: [string, string[]] };
 
+// ast-grep has inline `ast-grep-ignore` directives but no scan flag to disable them. Scan an
+// ephemeral copy with only the directive word neutralized; preserve line and column positions.
+function unsuppressedInput(o: Opts, files: string[]) {
+  let shadow = "";
+  const aliases = new Map<string, string>();
+  const scanFiles = files.map((file) => {
+    const source = readFileSync(join(o.repo, file), "utf8");
+    const neutral = source.replace(SUPPRESSION, "$1ast-grep-xxxxxx");
+    if (neutral === source) return file;
+    if (!shadow) {
+      mkdirSync(o.out, { recursive: true });
+      shadow = mkdtempSync(join(o.out, "ast-scan-"));
+    }
+    const copy = join(shadow, file);
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, neutral);
+    const scanned = relative(o.repo, copy);
+    aliases.set(scanned, file);
+    return scanned;
+  });
+  return { scanFiles, aliases, cleanup: () => { if (shadow) rmSync(shadow, { recursive: true, force: true }); } };
+}
+
 function astGroup(context: AstContext) {
   const { o, ch, adapter, files, command } = context;
   const [cmd, pre] = command;
-  const args = adapter.id === "ts" ? ["scan", "-c", SG_CONFIG, "--json=compact", ...files] : ["scan", "--inline-rules", inlineRules(adapter), "--json=compact", ...files];
-  const result = run(cmd, [...pre, ...args], o.repo, { timeout: 300_000 });
-  if (result.code === -1) return { findings: [] as Finding[], errors: [] as string[], notices: [`ast/${adapter.id}: not run (ast-grep not found; ${installHint("ast-grep", o.toml.tools)})`] };
+  const input = unsuppressedInput(o, files);
   try {
-    const findings = parseMatches(result.out).map((match) => findingOf(match, ch, o.repo)).filter((item): item is Finding => item !== null);
-    const notices = AST[adapter.id].catchKind ? [] : [`ast/empty-catch: not run (${adapter.name} has no catch construct)`];
-    return { findings, errors: [] as string[], notices };
-  } catch (error) {
-    const detail = (result.err || (error as Error).message).trim().slice(0, 300);
-    return { findings: [] as Finding[], errors: [`${adapter.name}: ast-grep failed (exit ${result.code}): ${detail}`], notices: [] as string[] };
+    const args = adapter.id === "ts" ? ["scan", "-c", SG_CONFIG, "--json=compact", ...input.scanFiles] : ["scan", "--inline-rules", inlineRules(adapter), "--json=compact", ...input.scanFiles];
+    const result = run(cmd, [...pre, ...args], o.repo, { timeout: 300_000 });
+    if (result.code === -1) return { findings: [] as Finding[], errors: [] as string[], notices: [`ast/${adapter.id}: not run (ast-grep not found; ${installHint("ast-grep", o.toml.tools)})`] };
+    try {
+      const findings = parseMatches(result.out).map((match) => findingOf(match, ch, o.repo, input.aliases)).filter((item): item is Finding => item !== null);
+      const notices = AST[adapter.id].catchKind ? [] : [`ast/empty-catch: not run (${adapter.name} has no catch construct)`];
+      return { findings, errors: [] as string[], notices };
+    } catch (error) {
+      const detail = (result.err || (error as Error).message).trim().slice(0, 300);
+      return { findings: [] as Finding[], errors: [`${adapter.name}: ast-grep failed (exit ${result.code}): ${detail}`], notices: [] as string[] };
+    }
+  } finally {
+    input.cleanup();
   }
 }
 

@@ -26,7 +26,7 @@ function formConfig(o: Opts, parser: unknown) {
     "max-params": ["error", t.max_params],
     "max-lines-per-function": ["error", { max: t.max_lines_per_function, skipBlankLines: true, skipComments: true }],
   };
-  return [{ files: [TS_GLOB], languageOptions: { parser }, plugins: { sonarjs: sonarjs(o) }, rules }];
+  return [{ files: [TS_GLOB], linterOptions: { noInlineConfig: true }, languageOptions: { parser }, plugins: { sonarjs: sonarjs(o) }, rules }];
 }
 
 // Innermost function that holds the line: the latest start wins, so a head-line report maps to its own function.
@@ -47,7 +47,7 @@ function lintOne(ctx: { o: Opts; linter: any; config: object[]; ch: Changes }, f
   if (!ast) return [{ rule: "form", file, line: 1, msg: "eslint could not parse the file" }];
   const ranges: Range[] = [];
   walk(ast, null, ranges);
-  // Only our rules: inline eslint-disable comments for rules outside this config report too.
+  // Only our rules; inline directives cannot alter this gate's config.
   const mine = msgs.filter((m: any) => FORM_RULES.has(m.ruleId) && touchedMessage(file, ranges, ctx.ch, m.line));
   return mine.map((m: any) => ({ rule: `form/${m.ruleId}`, file, line: m.line, msg: m.message }));
 }

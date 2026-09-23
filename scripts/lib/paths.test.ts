@@ -2,10 +2,10 @@
 // works from any install folder (hooks, adapters and the pi extension resolve their own script).
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scriptPath } from "../../adapters/pi-code-quality.ts";
+import { scriptPath } from "../../adapters/invoke.ts";
 import { buildOpts, readArgs } from "./config.ts";
 import { adapterById, prePushTestCommand } from "./lang.ts";
 
@@ -16,9 +16,12 @@ const tmp = () => {
   dirs.push(dir);
   return dir;
 };
+const testHome = join(tmp(), "code-quality-home");
+process.env.CODE_QUALITY_HOME = testHome;
+const testEnv = { ...process.env, CODE_QUALITY_HOME: testHome };
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
-const sh = (cwd: string, cmd: string) => spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8" });
+const sh = (cwd: string, cmd: string) => spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8", env: testEnv });
 const commit = (repo: string, message: string) => sh(repo, `git add -A && git -c user.name=t -c user.email=t@t commit -qm ${JSON.stringify(message)}`);
 
 function docsRepo(toml: string) {
@@ -88,22 +91,28 @@ describe("project.base", () => {
 });
 
 describe("install folder", () => {
-  test("the pi extension resolves the script next to itself, QG_SCRIPT overrides", () => {
-    expect(scriptPath({})).toBe(join(SKILL, "scripts/quality.ts"));
-    expect(existsSync(scriptPath({}))).toBe(true);
-    expect(scriptPath({ QG_SCRIPT: "/opt/code-quality/scripts/quality.ts" })).toBe("/opt/code-quality/scripts/quality.ts");
+  test("the pi extension resolves the script next to itself", () => {
+    expect(scriptPath()).toBe(join(SKILL, "scripts/quality.ts"));
+    expect(existsSync(scriptPath())).toBe(true);
   });
 
   test("hooks installed from a copy of the skill call that copy", () => {
     const install = join(tmp(), "code-quality");
     mkdirSync(install, { recursive: true });
-    for (const dir of ["scripts", "hooks", "rules", "adapters"]) cpSync(join(SKILL, dir), join(install, dir), { recursive: true });
+    for (const dir of ["scripts", "git-hooks", "rules", "adapters", "skills"]) cpSync(join(SKILL, dir), join(install, dir), { recursive: true });
     const repo = docsRepo('[project]\nbase = "HEAD"\n');
-    const installed = spawnSync(process.execPath, [join(install, "scripts/quality.ts"), "install-hooks", repo], { encoding: "utf8" });
-    expect(installed.stdout).toContain(join(install, "hooks"));
+    const installed = spawnSync(process.execPath, [join(install, "scripts/quality.ts"), "install-hooks", repo], { encoding: "utf8", env: testEnv });
+    expect(installed.stdout).toContain(join(testHome, "git-hooks"));
     writeFileSync(join(repo, "README.md"), "# a\n\nb\n");
     const committed = commit(repo, "docs: second line");
     expect([committed.status, existsSync(join(repo, ".scratch/quality/check.md"))]).toEqual([0, true]);
+    const next = join(tmp(), "code-quality-next");
+    mkdirSync(next, { recursive: true });
+    for (const dir of ["scripts", "git-hooks", "rules", "adapters", "skills"]) cpSync(join(SKILL, dir), join(next, dir), { recursive: true });
+    spawnSync(process.execPath, [join(next, "scripts/quality.ts"), "check", "--if-configured", "--repo", repo], { encoding: "utf8", env: testEnv });
+    expect(readFileSync(join(testHome, "root"), "utf8").trim()).toBe(realpathSync(next));
+    writeFileSync(join(repo, "README.md"), "# a\n\nb\n\nc\n");
+    expect(commit(repo, "docs: third line").status).toBe(0);
   }, 180_000);
 });
 

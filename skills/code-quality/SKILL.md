@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: "Quality gate for a repo: one bun script behind git hooks (pre-commit, commit-msg, pre-push) and the Stop hooks of Claude Code, Codex and pi. Blocks test tampering, CRAP and complexity over the bar on changed functions, low diff coverage, new cycles, dead code, clones, secrets, vulnerable dependencies and AI attribution in commits. 12 languages, one .quality.toml per repo. Use when: quality gate, CRAP, complexity, ratchet, baseline, hotspots, dead code, import cycles, wire a repo into the gate, install quality hooks, .quality.toml, Stop hook for quality. Not for running ordinary tests, lint or typecheck."
+description: "Quality gate for a repo: one bun script behind git hooks and Claude Code, Codex, Grok, pi, omp, and OpenCode adapters. Blocks test tampering, high CRAP and complexity on changed functions, low diff coverage, new cycles, dead code, clones, secrets, vulnerable dependencies and AI attribution in commits. 12 languages, one .quality.toml per repo. Use when: quality gate, CRAP, complexity, ratchet, baseline, hotspots, dead code, import cycles, wire a repo into the gate, install quality hooks, .quality.toml. Not for running ordinary tests, lint or typecheck."
 ---
 
 # code-quality
@@ -22,7 +22,7 @@ CRAP needs fresh lcov (`<out_dir>/lcov.info`, by default `.scratch/quality`, wit
 ## Commands
 
 ```bash
-Q=~/.claude/skills/code-quality/scripts/quality.ts
+Q=<plugin-root>/scripts/quality.ts
 bun $Q install-hooks <repo>              # core.hooksPath for that repo only; repo hooks keep working
 bun $Q uninstall-hooks <repo>            # put the previous core.hooksPath back
 bun $Q --repo <repo> --update-baseline   # snapshot of the current debt (runs tests); repeat after a merge
@@ -40,11 +40,11 @@ Nothing is wired to one machine or one vendor: `[project] base` left empty is de
 
 ## Wire a repo
 
-1. Add `.quality.toml` to the repo root. Minimum: `[project] src` and `base`. Samples: `examples/typescript.quality.toml`, `examples/python.quality.toml`. Keys: [references/config.md](references/config.md).
+1. Add `.quality.toml` to the repo root. Minimum: `[project] src` and `base`. Samples: [TypeScript](../../examples/typescript.quality.toml), [Python](../../examples/python.quality.toml). Keys: [references/config.md](references/config.md).
 2. Add `.scratch/` to `.gitignore`; reports go there (`[project] out_dir` moves them).
 3. `bun $Q --repo <repo> --update-baseline`. The baseline lives in the main checkout, shared by worktrees. Without it the gate compares against `project.base` and says so. Run it again after updating the skill.
 4. `bun $Q install-hooks <repo>`. Existing hooks (husky, Git LFS) are chained, see [references/hook-chain.md](references/hook-chain.md).
-5. Optional: Stop hooks for Claude Code, Codex and pi, [adapters/ENABLE.md](adapters/ENABLE.md).
+5. Install the plugin for the agent as described in the repository README. Its Stop and shell guard hooks load with the package.
 
 ## Thresholds
 

@@ -60,7 +60,7 @@ describe("language-independent structural tools", () => {
   }, 60_000);
 
   test("documents the emitted Python empty-except rule id", () => {
-    const skill = readFileSync(join(import.meta.dir, "../../SKILL.md"), "utf8");
+    const skill = readFileSync(join(import.meta.dir, "../../skills/code-quality/SKILL.md"), "utf8");
     expect(skill).not.toContain("ast/py-empty-except");
     expect(existsSync(join(import.meta.dir, "../../rules/sg/py-empty-except.yml"))).toBe(false);
   });

@@ -1,0 +1,15 @@
+{
+  "name": "code-quality",
+  "description": "Quality gate plugins for coding agents",
+  "owner": {
+    "name": "Sergey Shima"
+  },
+  "plugins": [
+    {
+      "name": "code-quality",
+      "source": "./",
+      "version": "1.0.0",
+      "description": "Quality gate for agent and git changes"
+    }
+  ]
+}

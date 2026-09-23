@@ -21,9 +21,12 @@ const tmp = () => {
   dirs.push(d);
   return d;
 };
+const testHome = join(tmp(), "code-quality-home");
+process.env.CODE_QUALITY_HOME = testHome;
+const testEnv = { ...process.env, CODE_QUALITY_HOME: testHome };
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-const sh = (cwd: string, cmd: string) => spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8" });
+const sh = (cwd: string, cmd: string) => spawnSync("sh", ["-c", cmd], { cwd, encoding: "utf8", env: testEnv });
 const noGlossary = { toml: DEFAULTS } as never;
 const KEY_ENV = { OPENROUTER_API_KEY: "k" };
 
@@ -168,6 +171,8 @@ describe("agent-stop", () => {
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs}\n  return -1;\n}\n`);
     sh(repo, "git add src/a.ts");
     expect(JSON.parse(stop().stdout).decision).toBe("block");
+    const camel = spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, sessionId: "camel" }), encoding: "utf8" });
+    expect(JSON.parse(camel.stdout).decision).toBe("block");
   }, 120_000);
   test("a Jev note that changes between two Stops does not block a second time; a new red verdict does", async () => {
     const repo = tmp();
@@ -193,9 +198,13 @@ describe("agent-stop", () => {
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs(14)}\n  return -1;\n}\n`);
     expect(redAnswer(stopState, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toHaveProperty("decision", "block");
   }, 120_000);
-  test("stdin that is not JSON is an error (exit 1), not an allow", () => {
+  test("stdin that is not JSON is an error with JSON output (exit 1), not an allow", () => {
     const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: "garbage", encoding: "utf8" });
-    expect([r.status, r.stdout]).toEqual([1, ""]);
+    expect([r.status, JSON.parse(r.stdout).systemMessage]).toEqual([1, "code-quality Stop hook received invalid JSON input"]);
+  });
+  test("missing session id is an explicit JSON error", () => {
+    const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: JSON.stringify({ cwd: tmp() }), encoding: "utf8", env: testEnv });
+    expect([r.status, JSON.parse(r.stdout).systemMessage]).toEqual([1, "code-quality Stop hook failed: missing session_id/sessionId"]);
   });
 });
 
@@ -205,7 +214,7 @@ describe("install-hooks chains the repo's own hooks", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
   };
-  const q = (...args: string[]) => spawnSync("bun", [SCRIPT, ...args], { encoding: "utf8" });
+  const q = (...args: string[]) => spawnSync("bun", [SCRIPT, ...args], { encoding: "utf8", env: testEnv });
 
   test(".git/hooks: post-commit runs, pre-push gets the refs on stdin and its failure stops the push", () => {
     const repo = tmp();

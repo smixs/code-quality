@@ -36,7 +36,7 @@ function added(file: string, text: string): Changes {
 
 describe("secret/gitleaks", () => {
   test("documents the installed blocking scanners in the dated security section", () => {
-    const measurements = readFileSync(join(import.meta.dir, "../../references/measurements.md"), "utf8");
+    const measurements = readFileSync(join(import.meta.dir, "../../skills/code-quality/references/measurements.md"), "utf8");
     const section = measurements.split("## Security, 21.09.2026")[1]?.split("\n## ")[0] ?? "";
     expect(section).toContain("Gitleaks `8.30.1` and OSV Scanner `2.6.0` are installed");
     expect(section).toContain("Gitleaks findings block");
