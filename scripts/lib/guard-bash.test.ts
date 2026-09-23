@@ -15,6 +15,7 @@ describe("guard-bash", () => {
     "echo ok && git commit --no-verify -m fix",
     "FOO=1 git commit --no-verify -m fix", "HUSKY=0 git push --no-verify origin main",
     "FOO=1 HUSKY=0 git -c core.hooksPath=/tmp/empty commit -m fix",
+    "git commit -nm fix", "git commit -anm fix", "git commit -anF message.txt",
   ]) test(`rejects ${command}`, () => expect(bypassReason(command)).not.toBe(""));
 
   for (const command of [
@@ -22,6 +23,7 @@ describe("guard-bash", () => {
     "git commit --message=--no-verify", "echo 'git commit -n'", "# git push --no-verify",
     "git commit -- -n", "git push origin -- --no-verify",
     "printf '%s' 'git -c core.hooksPath=x commit'", "git status",
+    "git commit -mn", "git commit -m -n", "git commit -can", "git commit -C -n",
   ]) test(`allows ${command}`, () => expect(bypassReason(command)).toBe(""));
 
   test("camelCase input denies and [hooks] block_bypass=false allows", () => {

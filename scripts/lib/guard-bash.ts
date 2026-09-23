@@ -88,9 +88,15 @@ export function bypassReason(source: string): string {
     for (let i = 0; i < rest.length; i++) {
       const arg = rest[i];
       if (arg === "--") break;
-      if (["-m", "--message", "-F", "--file", "-t", "--template"].includes(arg)) { i++; continue; }
-      if (/^(?:--message|--file|--template)=/.test(arg) || /^-[mFt].+/.test(arg)) continue;
+      if (["-m", "--message", "-F", "--file", "-t", "--template", "-c", "-C", "--reedit-message", "--reuse-message"].includes(arg)) { i++; continue; }
+      if (/^(?:--message|--file|--template|--reedit-message|--reuse-message)=/.test(arg) || /^-[mFtcC].+/.test(arg)) continue;
       if (arg === "--no-verify" || (subcommand === "commit" && arg === "-n")) return `git ${subcommand} ${arg} skips verification hooks`;
+      if (subcommand === "commit" && /^-[^-]/.test(arg)) {
+        for (const flag of arg.slice(1)) {
+          if (flag === "n") return `git commit ${arg} skips verification hooks`;
+          if ("mFtcC".includes(flag)) break;
+        }
+      }
     }
   }
   return "";
