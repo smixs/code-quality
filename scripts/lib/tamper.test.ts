@@ -57,7 +57,7 @@ describe("tamper/inline-suppression", () => {
   for (const [file, line] of [["evidence-eslint-disable-codex.ts", 1], ["evidence-eslint-disable-next-line.ts", 1]] as const) {
     test(`flags ${file} at its added directive`, () => {
       const repo = tsRepo();
-      write(repo, "src/value.ts", readFileSync(join(import.meta.dir, "../../.scratch/task", file), "utf8"));
+      write(repo, "src/value.ts", readFileSync(join(import.meta.dir, "../fixtures", file), "utf8"));
       git(repo, "add", "-A");
       expect(tamper(repo).findings).toContainEqual(expect.objectContaining({ rule: "tamper/inline-suppression", file: "src/value.ts", line }));
     });

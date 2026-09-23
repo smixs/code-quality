@@ -8,9 +8,9 @@ import { buildOpts, readArgs } from "./config.ts";
 const root = resolve(import.meta.dir, "../..");
 const scratch = join(root, ".scratch");
 const script = join(root, "scripts/quality.ts");
-const evidence = join(scratch, "task");
+const evidence = join(root, "scripts/fixtures");
 const dirs: string[] = [];
-afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })), 30_000);
 
 function checkSource(source: string) {
   mkdirSync(scratch, { recursive: true });
