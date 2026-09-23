@@ -1,11 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { bypassReason } from "./guard-bash.ts";
 
 const SCRIPT = join(import.meta.dir, "../quality.ts");
+const scratch = resolve(import.meta.dir, "../../.scratch");
+mkdirSync(scratch, { recursive: true });
+
+function fixture() {
+  const repo = mkdtempSync(join(scratch, "guard-test-"));
+  const env = { ...process.env, HOME: join(repo, "home"), CODE_QUALITY_HOME: join(repo, "cq"), GROK_HOME: join(repo, "grok") };
+  const run = (command = "git commit --no-verify -m fix") => spawnSync("bun", [SCRIPT, "guard-bash"], {
+    cwd: repo, env, encoding: "utf8",
+    input: JSON.stringify({ cwd: repo, toolName: "Bash", toolInput: { command }, hookEventName: "PreToolUse" }),
+  });
+  return { repo, env, run };
+}
 
 describe("guard-bash", () => {
   for (const command of [
@@ -27,16 +38,29 @@ describe("guard-bash", () => {
   ]) test(`allows ${command}`, () => expect(bypassReason(command)).toBe(""));
 
   test("camelCase input denies and [hooks] block_bypass=false allows", () => {
-    const repo = mkdtempSync(join(tmpdir(), "qg-guard-"));
-    const home = join(repo, "home");
-    const run = () => spawnSync("bun", [SCRIPT, "guard-bash"], {
-      cwd: repo, env: { ...process.env, CODE_QUALITY_HOME: home }, encoding: "utf8",
-      input: JSON.stringify({ cwd: repo, toolName: "Bash", toolInput: { command: "git commit --no-verify -m fix" }, hookEventName: "PreToolUse" }),
-    });
+    const { repo, env, run } = fixture();
+    expect(spawnSync("git", ["init", "-q"], { cwd: repo, env }).status).toBe(0);
+    writeFileSync(join(repo, ".quality.toml"), "[hooks]\nblock_bypass = true\n");
     const denied = run();
     expect([denied.status, JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision]).toEqual([2, "deny"]);
     writeFileSync(join(repo, ".quality.toml"), "[hooks]\nblock_bypass = false\n");
     const allowed = run();
     expect([allowed.status, allowed.stdout.trim()]).toEqual([0, "{}"]);
+  });
+
+  test("allows bypass commands without a configured Git repository", () => {
+    const { repo, env, run } = fixture();
+    expect(spawnSync("git", ["init", "-q"], { cwd: repo, env }).status).toBe(0);
+    const unconfigured = run();
+    expect([unconfigured.status, unconfigured.stdout.trim()]).toEqual([0, "{}"]);
+    writeFileSync(join(repo, ".quality.toml"), "[hooks]\nblock_bypass = true\n");
+    expect(JSON.parse(run().stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+
+  test("allows a non-Git directory even if it has .quality.toml", () => {
+    const { repo, run } = fixture();
+    writeFileSync(join(repo, ".quality.toml"), "[hooks]\nblock_bypass = true\n");
+    const outside = run();
+    expect([outside.status, outside.stdout.trim()]).toEqual([0, "{}"]);
   });
 });

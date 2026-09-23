@@ -1,7 +1,8 @@
 // Translate a shell tool call into the shared PreToolUse decision. This scans direct git commands;
 // it intentionally does not claim to interpret shell substitutions or wrapper scripts.
 import { readFileSync } from "node:fs";
-import { type Args, DEFAULTS, loadToml, repoConfigFile } from "./config.ts";
+import { type Args, loadToml, repoConfigFile } from "./config.ts";
+import { run } from "./util.ts";
 
 type Word = { value: string; quoted: boolean };
 
@@ -111,9 +112,10 @@ export function guardBash(_args: Args) {
     console.log("{}");
     return;
   }
-  let config = "";
-  try { config = repoConfigFile(cwd); } catch { /* outside git: use the default guard */ }
-  const enabled = config ? loadToml(config).hooks.block_bypass : DEFAULTS.hooks.block_bypass;
+  const top = run("git", ["rev-parse", "--show-toplevel"], cwd);
+  const config = top.code === 0 ? repoConfigFile(top.out.trim()) : "";
+  if (!config) { console.log("{}"); return; }
+  const enabled = loadToml(config).hooks.block_bypass;
   const reason = enabled ? bypassReason(command) : "";
   if (!reason) { console.log("{}"); return; }
   console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
