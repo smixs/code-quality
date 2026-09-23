@@ -50,7 +50,7 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   `error_path_tested_threshold` (0.5), `assertion_weakened_threshold`, `mock_hides_behavior_threshold`,
   `property_tautology_threshold` (the last three at 0.7). `llm` is not wired yet, `true` gives one
   `note:` line.
-  Reviewers never block (owner decision 3).
+  Reviewers never block.
 
 The list of guarded keys and the rule for changing them together with sources is in
 "Bypasses and their trace".

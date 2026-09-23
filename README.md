@@ -140,7 +140,6 @@ Details, the model pins and the curl for each: [Jev reference](skills/code-quali
 - [Languages and adapters](skills/code-quality/references/languages.md)
 - [Configure `.quality.toml` and hooks](skills/code-quality/references/config.md)
 - [Jev: an optional classifier for test hunks](skills/code-quality/references/jev.md)
-- [Evaluation: 6 sabotages, 2 real defects, 0 false blocks](skills/code-quality/references/evaluation.md)
 - [SKILL.md](skills/code-quality/SKILL.md), the full reference the agent reads
 
 ## Credits

@@ -1,6 +1,6 @@
 // Jev review notes: five Noul questions on added test hunks, asked through a Jev provider (TypeSafe
 // direct, OpenRouter, or a custom endpoint with the same contract). Notes only: nothing here can
-// change the verdict (owner decision 3). Any failure is one "jev: not available (<reason>)" line,
+// change the verdict. Any failure is one "jev: not available (<reason>)" line,
 // never a silent pass. Every verdict goes to jev-log.jsonl.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { localStubShadows } from "./tamper.ts";
 import { git, mainCheckout, run } from "./util.ts";
 
 const TIMEOUT_MS = 5000;
-// The pilot's conservative approximation for Jev's 32k-token state limit. This budget is shared by
+// A conservative approximation of Jev's 32k-token state limit. This budget is shared by
 // all text fields in one state, so adding questions cannot multiply the state size.
 const MAX_STATE_CHARS = 40000;
 // Code that adds a throw, a catch or an error return: only then is "error path not tested" asked.
@@ -34,7 +34,7 @@ type QId = "textual_test" | "error_path_tested" | "assertion_weakened" | "mock_h
 const replacedLines = (h: Hunk) => h.text.split("\n").some((l) => l.startsWith("+")) && h.text.split("\n").some((l) => l.startsWith("-"));
 const PROPERTY = /\bfc\.(?:assert|property)\s*\(|@given\b|\bhypothesis\b/;
 
-// Wording is verbatim from pilot2/scripts/questions2.ts: textual_test variant B, error_path_tested variant A.
+// Question wording is fixed: changing it changes what the thresholds mean.
 export const QUESTIONS: QDef[] = [
   {
     id: "textual_test",
@@ -190,7 +190,7 @@ export const postWith = (fetchImpl: typeof fetch): Post => async (target, body, 
 
 export const defaultJev = (): JevDeps => ({ env: process.env, post: postWith(fetch) });
 
-// ---- hunks: added test hunks with 3 lines of context, like the pilot's items
+// ---- hunks: added test hunks with 3 lines of context, as Jev expects them
 
 type St = { file: string; cur: Hunk | null };
 

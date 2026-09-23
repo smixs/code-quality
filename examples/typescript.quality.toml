@@ -1,6 +1,6 @@
 # code-quality config, TypeScript. Copy to <repo>/.quality.toml, then
 #   bun ~/.claude/skills/code-quality/scripts/quality.ts install-hooks <repo>
-# Every key the skill understands, with one bar for every repo (owner decision, 18.09.2026).
+# Every key the skill understands, with one bar for every repo.
 
 [project]
 language = "ts"
@@ -43,7 +43,7 @@ marker = "_Avoid_:"
 # Lines with a qualifier are skipped by the script: they name a sense, not a word. allow = plain-line
 # words that are still homonyms in this repo (npm overrides, system cron, a schedule Job, a poller).
 allow = ["cron", "override", "job", "poller", "transport", "registry"]
-# Prose the owner and the agent write. CHANGELOG quotes history and is left out.
+# Prose people and agents write. CHANGELOG quotes history and is left out.
 globs = ["README.md", "AGENTS.md", "CONTEXT.md", "CONTRIBUTING.md", "SECURITY.md", "docs/**/*.md", "src/**/*.md"]
 commit_msg = true
 
@@ -80,9 +80,7 @@ pre_push_max_tests = 40
 # gitleaks = "/opt/bin/gitleaks"
 
 [review]
-# Jev notes on added test hunks (SKILL.md "Jev"). Notes only, never block (owner decision 3,
-# 18.09.2026). The first two thresholds are from pilot 2. All thresholds are provisional until the
-# owner's blind labels. The LLM reviewer is not wired yet.
+# Jev notes on added test hunks (SKILL.md "Jev"). Notes only, never block. Thresholds are advisory.
 jev = true
 # auto = TypeSafe when TYPESAFE_API_KEY is set, else OpenRouter when OPENROUTER_API_KEY is set.
 # typesafe -> https://api.typesafe.ai/v1/systemone, TYPESAFE_API_KEY, model jev-1.13.0

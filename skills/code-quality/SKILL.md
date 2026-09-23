@@ -101,4 +101,4 @@ An optional classifier for added test hunks: five yes/no questions with a calibr
 - Skipping `--update-baseline` after updating the skill: the new adapter lists do not block until then.
 - Updating the baseline in the same commit as code: `tamper/baseline-touched` blocks it by design.
 
-More limits: [references/limits.md](references/limits.md). Report layout: [references/report.md](references/report.md). Measured noise on real repos: [references/measurements.md](references/measurements.md). Evaluation against sabotages: [references/evaluation.md](references/evaluation.md).
+More limits: [references/limits.md](references/limits.md). Report layout: [references/report.md](references/report.md).

@@ -49,8 +49,7 @@ Errors are one line and never a verdict: 401 an invalid key, 422 a malformed req
 
 ## The questions
 
-The first two come from pilot 2 with its wording, state shape and threshold (the pilot report of
-18.09.2026):
+Each question has fixed wording, state shape and threshold:
 
 | question | when it is asked | state | note |
 |---|---|---|---|
@@ -69,20 +68,11 @@ All applicable questions of one hunk go in one request; there are at most `jev_m
   not a block: only the deterministic checks decide the exit code;
 - `jev: nothing to ask (no added test hunks)`.
 
-**The notes are provisional.** The thresholds were chosen on the pilot sample, with Opus as the
-reference. They become final after the owner's blind labels (not done yet). Every answer is written to
-`<main checkout>/<out_dir>/jev-log.jsonl` (`question`, `p`, `file`, `hunk`, `sha` = HEAD at
-check time, for pre-commit the commit's parent, `scope`, `model` as the answer reported it, `noted`) so the thresholds can be revisited
-after a month of use. `fallback_hides_required` is off: it failed the pilot.
+**The notes are advisory.** Every answer is written to `<main checkout>/<out_dir>/jev-log.jsonl`
+(`question`, `p`, `file`, `hunk`, `sha` = HEAD at check time, for pre-commit the commit's parent,
+`scope`, `model` as the answer reported it, `noted`) so the thresholds can be revisited on your own
+history. `fallback_hides_required` is off.
 
-### Jev: known false positives
-
-- `assertion_weakened p=0.88`, `agent/lib/reminder-store.property.test.ts:+246`, a clean Opus branch:
-  a migration property test replaced the exact `schemaVersion === 2` with a check of the allowed set
-  `2 || REMINDER_SCHEMA_VERSION`. A writer may keep an old valid schema or write the current one
-  whole. That widens a correct invariant instead of weakening the proof. The threshold did not change;
-  the decision waits for the owner's blind labels.
-
-Rules for working with Jev (docs.typesafe.ai, notes from the pilot): one atomic question per property,
+Rules for working with Jev (docs.typesafe.ai): one atomic question per property,
 in English, only the fields the question reads in the state, a 32k-token limit per state; Noul returns
 one probability with no confidence.

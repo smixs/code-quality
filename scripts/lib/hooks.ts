@@ -29,7 +29,7 @@ const ZERO = /^0+$/;
 
 // ---- check: deterministic gate on the current change (seconds)
 
-// ok is decided by the deterministic checks only; Jev lines are notes (owner decision 3).
+// ok is decided by the deterministic checks only; Jev lines are notes.
 export async function runCheck(o: Opts, jev: JevDeps = defaultJev()) {
   const a = analyze(o, "fresh-or-none");
   const g = gate(o, a);

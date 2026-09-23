@@ -34,7 +34,7 @@
   HTTP layer, one `check` run on a temporary repo, the hook chain with `.git/hooks` and with a husky
   path, the Stop key; the script's own mean CRAP is 3.6 at the coverage from these tests).
 - Jev sees the test hunks of the language adapter's `testGlobs`; over a whole workflow there are fewer
-  positives than in the pilot sample, so `textual_test` precision is lower (pilot estimate ~0.65).
+  true positives than in a curated sample, so `textual_test` precision is lower (about 0.65).
 - Flaky tests move coverage: on a changed function that can give a false CRAP > 30, rerun.
 - `pre-push` runs the tests of the working tree, not of the pushed commit. It prints `touched tests: N
   by name, M by import`; importers are searched one level deep and cut off by the shared

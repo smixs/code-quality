@@ -8,7 +8,7 @@ import { mainCheckout, run, splitList } from "./util.ts";
 
 export const CONFIG_FILE = ".quality.toml";
 
-// One bar everywhere (owner, 18.09.2026): changed functions gate on cc/CRAP; repo mean is a warning threshold.
+// One bar everywhere: changed functions gate on cc/CRAP; repo mean is a warning threshold.
 export const DEFAULTS = {
   // base "" = detect from the remote (see detectBase); out_dir holds every report this gate writes.
   project: { language: "" as string | string[], src: ["."], base: "", test_cmd: "", tools_dir: "", out_dir: ".scratch/quality" },
@@ -36,7 +36,7 @@ export const DEFAULTS = {
   // registry_urls: ecosystem -> URL template for the lock-age lookup (a mirror; "" = no registry).
   security: { gitleaks: true, audit: true, registry_urls: {} as Record<string, string> },
   hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40, block_bypass: true },
-  // Jev notes never block (owner decision 3). The first two questions and thresholds are from pilot 2 (18.09.2026).
+  // Jev notes never block. Thresholds are advisory and can be tuned per repo.
   review: {
     jev: false,
     llm: false,
