@@ -13,6 +13,8 @@ describe("guard-bash", () => {
     "git -c core.hooksPath=/tmp/empty commit -m fix", "git -ccore.hooksPath=/tmp/empty push",
     "git config core.hooksPath /tmp/empty", "git config --unset core.hooksPath",
     "echo ok && git commit --no-verify -m fix",
+    "FOO=1 git commit --no-verify -m fix", "HUSKY=0 git push --no-verify origin main",
+    "FOO=1 HUSKY=0 git -c core.hooksPath=/tmp/empty commit -m fix",
   ]) test(`rejects ${command}`, () => expect(bypassReason(command)).not.toBe(""));
 
   for (const command of [

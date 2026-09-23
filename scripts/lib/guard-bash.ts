@@ -54,10 +54,12 @@ function commands(source: string): Word[][] {
 
 const gitToken = (value: string) => value === "git" || value.endsWith("/git");
 const hookPath = (value: string) => /^core\.hooksPath(?:=|$)/i.test(value);
+const assignment = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
 
 export function bypassReason(source: string): string {
   for (const words of commands(source)) {
-    const gitIndex = words.findIndex((word, i) => gitToken(word.value) && (i === 0 || ["env", "command", "exec", "sudo"].includes(words[0].value)));
+    const first = words.findIndex((word) => !assignment(word.value));
+    const gitIndex = words.findIndex((word, i) => gitToken(word.value) && (i === first || (first >= 0 && ["env", "command", "exec", "sudo"].includes(words[first].value))));
     if (gitIndex < 0) continue;
     const args = words.slice(gitIndex + 1).map((word) => word.value);
     let subcommand = "";
