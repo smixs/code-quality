@@ -207,7 +207,7 @@ function tsFunctions(o: Opts, files: string[], deps: AnalysisDeps): NativeFuncti
     return { fns: [], fallback: files };
   }
   const linter = new loaded.Linter({ configType: "flat", cwd: o.repo });
-  const config = [{ files: [TS_GLOB], languageOptions: { parser: loaded.parser }, rules: { complexity: ["warn", 0] } }];
+  const config = [{ files: [TS_GLOB], linterOptions: { noInlineConfig: true }, languageOptions: { parser: loaded.parser }, rules: { complexity: ["warn", 0] } }];
   const results = files.map((file) => lintFile({ repo: o.repo, linter, config }, file));
   return {
     fns: results.flatMap((result) => result.fns),

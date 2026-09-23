@@ -56,6 +56,25 @@ describe("language-independent CRAP", () => {
     ]);
   }, 60_000);
 
+  test("Lizard CSV still counts Go branches beside forgiveness comments", () => {
+    const repo = mkdtempSync(join(tmpdir(), "qg-lizard-comment-"));
+    dirs.push(repo);
+    writeFileSync(join(repo, "go.mod"), "module example.test/comment\n");
+    writeFileSync(join(repo, "value.go"), `package comment
+//nolint:gocyclo
+// #lizard forgives(cyclomatic_complexity)
+func classify(n int) int {
+${Array.from({ length: 12 }, (_, i) => `  if n == ${i} { return ${i} }`).join("\n")}
+  return -1
+}
+`);
+    Bun.spawnSync(["git", "init", "-q"], { cwd: repo });
+    Bun.spawnSync(["git", "add", "-A"], { cwd: repo });
+    const o = buildOpts(readArgs(["check", "--repo", repo, "--all", "--no-deps"]));
+    const result = functionsOf(o, sourceFiles(o));
+    expect(result.fns.find((fn) => fn.name.includes("classify"))?.cc).toBe(13);
+  }, 60_000);
+
   test("keeps ESLint as the TypeScript complexity source when Lizard disagrees", () => {
     const repo = mkdtempSync(join(tmpdir(), "qg-ts-native-"));
     dirs.push(repo);

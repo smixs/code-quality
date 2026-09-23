@@ -57,6 +57,20 @@ describe("adapter tool runner", () => {
     expect(rules(ratchetAdapterChecks(checks, known))).toEqual(["deps/cycle", "form/gocyclo", "deps/audit"]);
   });
 
+  test("gocyclo ignore directive cannot hide form findings", () => {
+    const root = repo("go.mod", "module example.test/app\n");
+    writeFileSync(join(root, "value.go"), "package app\n//gocyclo:ignore\nfunc classify(n int) int { if n > 0 { return n }; return 0 }\n");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    stub(bin, "gocyclo", `target="$3"
+if [ "$target" = . ]; then target=value.go; fi
+if grep -q 'gocyclo:ignore' "$target"; then exit 0; fi
+printf '13 app classify %s:3:1\\n' "$target"
+exit 1`);
+    const checks = tools(root, bin, ["form"]);
+    expect(checks.flatMap((item) => item.findings)).toEqual([expect.objectContaining({ rule: "form/gocyclo", file: "value.go", line: 3 })]);
+  });
+
   test("audits each discovered lockfile explicitly and prints one clean repo summary", () => {
     const root = repo("package.json", "{}\n");
     writeFileSync(join(root, "package-lock.json"), "{}\n");
