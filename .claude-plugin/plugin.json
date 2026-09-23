@@ -1,0 +1,8 @@
+{
+  "name": "code-quality",
+  "version": "1.0.0",
+  "description": "Deterministic quality gate for coding agents and git hooks",
+  "author": {
+    "name": "Sergey Shima"
+  }
+}

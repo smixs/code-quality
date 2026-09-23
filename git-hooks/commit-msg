@@ -2,5 +2,6 @@
 # code-quality commit-msg: blocks AI/tool attribution lines (and glossary Avoid words when configured).
 # Own verdict first; green = the repo's own commit-msg runs (hooks/_chain).
 here=$(dirname "$0")
-bun "$here/../scripts/quality.ts" hook commit-msg "$1" --repo "$(git rev-parse --show-toplevel)" || exit $?
+root=$(cat "$here/../root") || exit 2
+bun "$root/scripts/quality.ts" hook commit-msg "$1" --repo "$(git rev-parse --show-toplevel)" || exit $?
 exec "$here/_chain" commit-msg "$@"

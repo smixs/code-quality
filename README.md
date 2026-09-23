@@ -5,20 +5,20 @@
   <img src="assets/logo-light.svg" width="440" alt="Code Quality">
 </picture>
 
-# Code Quality Skill
+# Code Quality
 
 **Your AI agent made the tests green. Did it fix the code, or the tests?**
 
 A quality gate for coding agents: git hooks and Stop hooks that block test tampering and hold one complexity bar on every changed function. 12 languages, one config file, no server.
 
 <p>
-  <a href="https://skills.sh/smixs/code-quality-skill"><img src="https://skills.sh/b/smixs/code-quality-skill?style=flat-square" alt="skills.sh installs"></a>
+  <a href="https://skills.sh/smixs/code-quality"><img src="https://skills.sh/b/smixs/code-quality?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
   <a href="scripts/"><img src="https://img.shields.io/badge/tests-166_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="166 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
-  <a href="adapters/ENABLE.md"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
-  <a href="adapters/ENABLE.md"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
-  <a href="references/jev.md"><img src="https://img.shields.io/badge/Jev-TypeSafe_%7C_OpenRouter-0ea5e9?style=flat-square" alt="Jev"></a>
+  <a href="hooks/hooks.json"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
+  <a href="adapters/pi.ts"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
+  <a href="skills/code-quality/references/jev.md"><img src="https://img.shields.io/badge/Jev-TypeSafe_%7C_OpenRouter-0ea5e9?style=flat-square" alt="Jev"></a>
 </p>
 
 <p>
@@ -58,7 +58,8 @@ Deterministic. Exit code 1, file and line in the report. No model is asked for a
 ```mermaid
 flowchart LR
     A[git hooks] --> Q
-    B[Stop hook: Claude Code, Codex, pi] --> Q
+    B[Stop hook: Claude, Codex, Grok, pi, omp] --> Q
+    C[OpenCode idle notice] --> Q
     Q[one script] --> D{new finding on a changed line?}
     D -->|yes| F[GATE FAIL, agent gets one round to fix]
     D -->|no| P[GATE PASS]
@@ -71,27 +72,48 @@ flowchart LR
 
 ## Install
 
-Through the [skills.sh](https://skills.sh/smixs/code-quality-skill) CLI, into Claude Code, Codex, Cursor and 40 other agents:
+[Bun](https://bun.sh) is required for the gate and the shell hooks. After the GitHub repository is renamed to `smixs/code-quality`, install for your agent:
 
-```bash
-npx skills add smixs/code-quality-skill -g          # asks which agents; -g = for all your projects
-npx skills add smixs/code-quality-skill -g -a claude-code -y   # non-interactive
+| Agent | Install |
+|---|---|
+| Claude Code | `claude plugin marketplace add smixs/code-quality` then `claude plugin install code-quality@code-quality` |
+| Codex | `codex plugin marketplace add smixs/code-quality` then `codex plugin add code-quality@code-quality`; review and trust its hooks with `/hooks` |
+| Grok | `grok plugin install smixs/code-quality --trust` |
+| pi | `pi install git:github.com/smixs/code-quality` |
+| omp | `omp plugin install github:smixs/code-quality` |
+| OpenCode V1 | `bun add github:smixs/code-quality` in a project with `package.json`, then add `"plugin": ["file:./node_modules/code-quality"]` and `"skills": ["./node_modules/code-quality/skills"]` to `opencode.json` |
+| OpenCode V2 | Add `"plugins": ["github:smixs/code-quality"]` to `opencode.json` |
+| Skill only | `npx skills add smixs/code-quality` (does not install hooks) |
+
+Claude, Codex and Grok load [Stop and PreToolUse hooks](hooks/hooks.json). pi and omp load the package extensions. OpenCode blocks the shell tool before a bypass and writes a session message on idle when the gate is red; its idle event cannot force another agent turn. OpenCode V1.18.32 reads the plugin's `config.skills` value but does not discover the skill from it. Add an explicit `"skills": ["./node_modules/code-quality/skills"]` entry to `opencode.json` when using a project Bun installation. `git commit --no-verify`, `git commit -n`, `git push --no-verify`, `git -c core.hooksPath=...` and `git config core.hooksPath` are blocked by default. Set `[hooks] block_bypass = false` in `.quality.toml` to disable this guard.
+
+To enable the plugin for a team repository, commit these project settings:
+
+```jsonc
+// .claude/settings.json
+{ "extraKnownMarketplaces": { "code-quality": { "source": { "source": "github", "repo": "smixs/code-quality" } } },
+  "enabledPlugins": { "code-quality@code-quality": true } }
+// .pi/settings.json
+{ "packages": ["git:github.com/smixs/code-quality"] }
+// opencode.json (V2)
+{ "plugins": ["github:smixs/code-quality"] }
 ```
 
-Or by hand:
+For Codex, commit `.codex/config.toml`:
 
-```bash
-git clone https://github.com/smixs/code-quality-skill ~/.claude/skills/code-quality
+```toml
+[plugins."code-quality@code-quality"]
+enabled = true
 ```
 
-Then wire a repo (needs [bun](https://bun.sh)):
+Wire each Git repository with a `.quality.toml` and a baseline. From the plugin checkout or installed package root:
 
 ```bash
-bun ~/.claude/skills/code-quality/scripts/quality.ts install-hooks <repo>
-bun ~/.claude/skills/code-quality/scripts/quality.ts --repo <repo> --update-baseline
+bun scripts/quality.ts install-hooks <repo>
+bun scripts/quality.ts --repo <repo> --update-baseline
 ```
 
-Existing hooks keep working. Stop hooks for the agents: [references/config.md](references/config.md).
+`install-hooks` sets `core.hooksPath` to `~/.local/share/code-quality/git-hooks/`, or `$CODE_QUALITY_HOME/git-hooks/`. A root pointer follows the latest invoked plugin copy. Existing repository hooks are chained. See [configuration](skills/code-quality/references/config.md).
 
 ## Jev, optional
 
@@ -110,16 +132,16 @@ jev = true                    # OPENROUTER_API_KEY in the environment
 jev_provider = "openrouter"
 ```
 
-Details, the model pins and the curl for each: [references/jev.md](references/jev.md).
+Details, the model pins and the curl for each: [Jev reference](skills/code-quality/references/jev.md).
 
 ## Docs
 
-- [Every rule, what blocks and what only notes](references/checks.md)
-- [Languages and adapters](references/languages.md)
-- [Configure `.quality.toml`, git hooks, Stop hooks](references/config.md)
-- [Jev: an optional classifier for test hunks](references/jev.md)
-- [Evaluation: 6 sabotages, 2 real defects, 0 false blocks](references/evaluation.md)
-- [SKILL.md](SKILL.md), the full reference the agent reads
+- [Every rule, what blocks and what only notes](skills/code-quality/references/checks.md)
+- [Languages and adapters](skills/code-quality/references/languages.md)
+- [Configure `.quality.toml` and hooks](skills/code-quality/references/config.md)
+- [Jev: an optional classifier for test hunks](skills/code-quality/references/jev.md)
+- [Evaluation: 6 sabotages, 2 real defects, 0 false blocks](skills/code-quality/references/evaluation.md)
+- [SKILL.md](skills/code-quality/SKILL.md), the full reference the agent reads
 
 ## Credits
 

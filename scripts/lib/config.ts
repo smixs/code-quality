@@ -35,7 +35,7 @@ export const DEFAULTS = {
   secrets: { allow_users: [] as string[] },
   // registry_urls: ecosystem -> URL template for the lock-age lookup (a mirror; "" = no registry).
   security: { gitleaks: true, audit: true, registry_urls: {} as Record<string, string> },
-  hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40 },
+  hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40, block_bypass: true },
   // Jev notes never block (owner decision 3). The first two questions and thresholds are from pilot 2 (18.09.2026).
   review: {
     jev: false,

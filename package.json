@@ -1,0 +1,28 @@
+{
+  "name": "code-quality",
+  "version": "1.0.0",
+  "description": "Deterministic quality gate for coding agents",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "quality-gate",
+    "coding-agent"
+  ],
+  "main": "./adapters/opencode.js",
+  "pi": {
+    "extensions": [
+      "./adapters/pi.ts"
+    ],
+    "skills": [
+      "./skills/"
+    ]
+  },
+  "omp": {
+    "extensions": [
+      "./adapters/omp.ts"
+    ],
+    "skills": [
+      "./skills/"
+    ]
+  }
+}

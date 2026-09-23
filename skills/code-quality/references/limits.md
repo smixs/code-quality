@@ -30,7 +30,7 @@
   adapter command is not installed, the report writes the exact `not run` with the install command.
 - The very first commit of a repo (no HEAD yet) is not checked by the hooks: the report fails on
   `git rev-parse HEAD`. Make the first commit with `--no-verify`, the hook works from there.
-- The script's own tests: `bun test scripts/` in the skill folder (seam behaviour, Jev with a stubbed
+- The script's own tests: `bun test scripts/` in the plugin root (seam behaviour, Jev with a stubbed
   HTTP layer, one `check` run on a temporary repo, the hook chain with `.git/hooks` and with a husky
   path, the Stop key; the script's own mean CRAP is 3.6 at the coverage from these tests).
 - Jev sees the test hunks of the language adapter's `testGlobs`; over a whole workflow there are fewer
@@ -42,7 +42,7 @@
   `origin/main`) takes the diff from the parent, the root commit from an empty tree.
 - husky in `prepare` (`npm install`) rewrites `core.hooksPath` to `.husky/_` on its own and the skill's
   hooks switch off: run `install-hooks` again after installing dependencies. `git lfs install` in a repo
-  with our `core.hooksPath` writes its hooks into the skill folder (or refuses when a file is already
+  with our `core.hooksPath` writes its hooks into the stable code-quality home (or refuses when a file is already
   there): install LFS hooks before `install-hooks`, or with `--local` after `uninstall-hooks`.
 - A trial push of an LFS repo goes into a scratch clone only (`GIT_LFS_SKIP_SMUDGE=1 git clone
   --shared`) where `origin` is removed, a remote named after a local bare repo exists and

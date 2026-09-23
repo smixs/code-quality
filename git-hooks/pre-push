@@ -6,5 +6,6 @@ here=$(dirname "$0")
 refs=$(mktemp) || exit 1
 trap 'rm -f "$refs"' EXIT
 cat > "$refs"
-bun "$here/../scripts/quality.ts" hook pre-push --repo "$(git rev-parse --show-toplevel)" < "$refs" || exit $?
+root=$(cat "$here/../root") || exit 2
+bun "$root/scripts/quality.ts" hook pre-push --repo "$(git rev-parse --show-toplevel)" < "$refs" || exit $?
 "$here/_chain" pre-push "$@" < "$refs"
