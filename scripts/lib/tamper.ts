@@ -23,6 +23,8 @@ const CALL_WEAKENINGS = [
 const TAMPER_MARK = /(?:qg:(?:allow|test-removed)|gitleaks:allow)\b/;
 const DOCUMENTED_MARK = /`(?:qg:(?:allow|test-removed)|gitleaks:allow)\b[^`]*`/;
 const MARK_ONLY = /^\s*(?:(?:\/\/|#|<!--)\s*)?(?:qg:(?:allow|test-removed)|gitleaks:allow)\b.*?(?:-->)?\s*$/;
+const ESLINT_GATE_RULES = new Set(["complexity", "sonarjs/cognitive-complexity", "max-depth", "max-params", "max-lines-per-function"]);
+const AST_GATE_RULES = new Set(["empty-catch", "catch-only-logs", "textual-test"]);
 
 const MOCKS = [
   /\b(?:vi|jest)\.mock\s*\(\s*["'`]([^"'`]+)["'`]/,
@@ -56,10 +58,138 @@ export function tamperCheck(o: Opts, ch: Changes, context: TamperContext = {}) {
   const removed = testDeleted(ch, o);
   const weakened = assertionWeakened(o, ch);
   const bypass = removalBypass(o, context);
-  const findings = [...(bypass ? [] : removed), ...testSkipped(o, ch), ...weakened];
+  const findings = [...(bypass ? [] : removed), ...testSkipped(o, ch), ...weakened, ...inlineSuppressions(o, ch)];
   const bypasses = bypass ? removalBypassNotes(bypass, removed) : [];
   const baseline = baselineTouched(o, ch, context);
   return notedCheck("tamper", [...findings, ...baseline.findings], "", [...bypasses, ...mockNotes(o, ch), ...baseline.notes]);
+}
+
+type Comment = { line: number; text: string };
+type CommentScan = { index: number; line: number; quote: string; comments: Comment[] };
+
+// Read comments from the current source, so a directive-shaped string does not become a finding.
+function sourceComments(source: string, hashComments: boolean): Comment[] {
+  const scan: CommentScan = { index: 0, line: 1, quote: "", comments: [] };
+  while (scan.index < source.length) {
+    if (skipQuoted(source, scan)) continue;
+    if (openQuote(source, hashComments, scan)) continue;
+    if (takeLineComment(source, hashComments, scan)) continue;
+    if (takeBlockComment(source, scan)) continue;
+    if (source[scan.index] === "\n") scan.line++;
+    scan.index++;
+  }
+  return scan.comments;
+}
+
+function skipQuoted(source: string, scan: CommentScan) {
+  if (!scan.quote) return false;
+  if (source[scan.index] === "\\") {
+    if (source[scan.index + 1] === "\n") scan.line++;
+    scan.index += 2;
+  } else if (source.startsWith(scan.quote, scan.index)) {
+    scan.index += scan.quote.length;
+    scan.quote = "";
+  } else {
+    if (source[scan.index] === "\n") scan.line++;
+    scan.index++;
+  }
+  return true;
+}
+
+function openQuote(source: string, hashComments: boolean, scan: CommentScan) {
+  const char = source[scan.index];
+  if (char !== "'" && char !== '"' && char !== "`") return false;
+  scan.quote = hashComments && source.startsWith(char.repeat(3), scan.index) ? char.repeat(3) : char;
+  scan.index += scan.quote.length;
+  return true;
+}
+
+function takeLineComment(source: string, hashComments: boolean, scan: CommentScan) {
+  const slash = source.startsWith("//", scan.index);
+  if (!slash && !(hashComments && source[scan.index] === "#")) return false;
+  const start = scan.index + (slash ? 2 : 1);
+  const end = source.indexOf("\n", start);
+  scan.comments.push({ line: scan.line, text: source.slice(start, end < 0 ? source.length : end) });
+  scan.index = end < 0 ? source.length : end;
+  return true;
+}
+
+function takeBlockComment(source: string, scan: CommentScan) {
+  if (!source.startsWith("/*", scan.index)) return false;
+  const end = source.indexOf("*/", scan.index + 2);
+  const text = source.slice(scan.index + 2, end < 0 ? source.length : end);
+  scan.comments.push({ line: scan.line, text });
+  scan.line += (text.match(/\n/g) ?? []).length;
+  scan.index = end < 0 ? source.length : end + 2;
+  return true;
+}
+
+function commentHead(comment: Comment) {
+  let line = comment.line;
+  for (const part of comment.text.split("\n")) {
+    const text = part.replace(/^[ \t]*(?:\*[ \t]*)?/, "").trim();
+    if (text) return { line, text };
+    line++;
+  }
+  return null;
+}
+
+function suppressionReason(language: string, text: string) {
+  const ast = astSuppression(text);
+  if (ast) return ast;
+  if (language === "ts") return eslintSuppression(text);
+  if (language === "py") return pythonSuppression(text);
+  if (language === "go") return goSuppression(text);
+  return "";
+}
+
+function astSuppression(text: string) {
+  const ast = /^ast-grep-ignore\b(.*)/.exec(text);
+  if (!ast) return "";
+  const rest = ast[1].trim();
+  if (!rest.startsWith(":")) return "ast-grep-ignore suppresses code-quality structural rules";
+  const ids = rest.slice(1).split(/[\s,]+/);
+  const rule = ids.find((id) => AST_GATE_RULES.has(id));
+  return rule ? `ast-grep-ignore suppresses code-quality rule ${rule}` : "";
+}
+
+function eslintSuppression(text: string) {
+  const eslint = /^eslint-disable(?:-next-line|-line)?\b(.*)/.exec(text);
+  if (!eslint) return "";
+  const list = eslint[1].split(/\s+--(?:\s|$)/)[0].trim();
+  if (!list) return "eslint-disable suppresses all code-quality ESLint rules";
+  const rule = list.split(/[\s,]+/).find((id) => ESLINT_GATE_RULES.has(id));
+  return rule ? `eslint-disable suppresses code-quality rule ${rule}` : "";
+}
+
+function pythonSuppression(text: string) {
+  return /^noqa\b/.test(text) || /^ruff:\s*(?:noqa|file-ignore|ignore)\b/.test(text)
+    ? "Python suppression comment hides Ruff form diagnostics" : "";
+}
+
+function goSuppression(text: string) {
+  if (/^gocyclo:ignore\b/.test(text)) return "gocyclo:ignore hides Go form diagnostics";
+  const nolint = /^nolint\b(.*)/.exec(text);
+  if (!nolint) return "";
+  const rest = nolint[1].trim();
+  if (!rest) return "nolint suppresses Go lint diagnostics";
+  const rules = rest.startsWith(":") ? rest.slice(1).split(/[\s,]+/) : [];
+  if (rules.includes("gocyclo")) return "nolint:gocyclo suppresses Go complexity diagnostics";
+  return "";
+}
+
+function inlineSuppressions(o: Opts, ch: Changes): Finding[] {
+  return [...ch].flatMap(([file, diff]) => {
+    const adapter = adapterForFile(o.langs, file);
+    if (!adapter || !existsSync(join(o.repo, file))) return [];
+    const hash = adapter.id === "py" || adapter.id === "ruby" || adapter.id === "php";
+    return sourceComments(readFileSync(join(o.repo, file), "utf8"), hash).flatMap((comment) => {
+      const head = commentHead(comment);
+      if (!head || !diff.added.has(head.line)) return [];
+      const reason = suppressionReason(adapter.id, head.text);
+      return reason ? [finding("tamper/inline-suppression", file, head.line, reason)] : [];
+    });
+  });
 }
 
 function removalBypass(o: Opts, context: TamperContext): AcceptedBypass | null {

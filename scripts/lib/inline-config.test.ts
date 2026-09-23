@@ -67,3 +67,9 @@ test("Python form findings survive noqa", () => {
   const result = adapterChecks(o, ["form"], { roots: o.langs.filter((item) => item.adapter.id === "py") });
   expect(result.flatMap((item) => item.findings.map((finding) => finding.rule))).toContain("form/F821");
 }, 120_000);
+
+test("a new suppression comment fails the gate even when the function is simple", () => {
+  const result = checkSource("// eslint-disable complexity\nexport function simple(n: number) { return n + 1; }\n");
+  expect(result.status).toBe(1);
+  expect(result.stdout).toContain("tamper/inline-suppression");
+}, 120_000);
