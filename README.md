@@ -72,7 +72,7 @@ flowchart LR
 
 ## Install
 
-[Bun](https://bun.sh) is required for the gate and the shell hooks. After the GitHub repository is renamed to `smixs/code-quality`, install for your agent:
+[Bun](https://bun.sh) is required for the gate and the shell hooks. Install for your agent:
 
 | Agent | Install |
 |---|---|
