@@ -58,7 +58,7 @@ Deterministic. Exit code 1, file and line in the report. No model is asked for a
 ```mermaid
 flowchart LR
     A[git hooks] --> Q
-    B[Stop hook: Claude, Codex, Grok, pi, omp] --> Q
+    B[Stop hook: Claude, Codex, pi, omp; Grok after global hook install] --> Q
     C[OpenCode idle notice] --> Q
     Q[one script] --> D{new finding on a changed line?}
     D -->|yes| F[GATE FAIL, agent gets one round to fix]
@@ -78,14 +78,14 @@ flowchart LR
 |---|---|
 | Claude Code | `claude plugin marketplace add smixs/code-quality` then `claude plugin install code-quality@code-quality` |
 | Codex | `codex plugin marketplace add smixs/code-quality` then `codex plugin add code-quality@code-quality`; review and trust its hooks with `/hooks` |
-| Grok | `grok plugin install smixs/code-quality --trust` |
+| Grok 1.0.40 | `grok plugin install smixs/code-quality --trust`, then from this repository or its installed plugin root run `bun scripts/quality.ts install-grok-hooks` |
 | pi | `pi install git:github.com/smixs/code-quality` |
 | omp | `omp plugin install github:smixs/code-quality` |
 | OpenCode V1 | `bun add github:smixs/code-quality` in a project with `package.json`, then add `"plugin": ["file:./node_modules/code-quality"]` and `"skills": ["./node_modules/code-quality/skills"]` to `opencode.json` |
 | OpenCode V2 | Add `"plugins": ["github:smixs/code-quality"]` to `opencode.json` |
 | Skill only | `npx skills add smixs/code-quality` (does not install hooks) |
 
-Claude, Codex and Grok load [Stop and PreToolUse hooks](hooks/hooks.json). pi and omp load the package extensions. OpenCode blocks the shell tool before a bypass and writes a session message on idle when the gate is red; its idle event cannot force another agent turn. OpenCode V1.18.32 reads the plugin's `config.skills` value but does not discover the skill from it. Add an explicit `"skills": ["./node_modules/code-quality/skills"]` entry to `opencode.json` when using a project Bun installation. `git commit --no-verify`, `git commit -n`, `git push --no-verify`, `git -c core.hooksPath=...` and `git config core.hooksPath` are blocked by default. Set `[hooks] block_bypass = false` in `.quality.toml` to disable this guard.
+Claude and Codex load [Stop and PreToolUse hooks](hooks/hooks.json) from the plugin. Grok 1.0.40 did not dispatch plugin hooks in a live check (`total_hooks=0`); `install-grok-hooks` writes `~/.grok/hooks/code-quality.json` with both commands pointing to the current plugin root. Run it again after moving or updating that root; `bun scripts/quality.ts uninstall-grok-hooks` removes that file. `$GROK_HOME` overrides the Grok directory. pi and omp load the package extensions. OpenCode blocks the shell tool before a bypass and writes a session message on idle when the gate is red; its idle event cannot force another agent turn. OpenCode V1.18.32 reads the plugin's `config.skills` value but does not discover the skill from it. Add an explicit `"skills": ["./node_modules/code-quality/skills"]` entry to `opencode.json` when using a project Bun installation. `git commit --no-verify`, `git commit -n`, `git push --no-verify`, `git -c core.hooksPath=...` and `git config core.hooksPath` are blocked by default. Set `[hooks] block_bypass = false` in `.quality.toml` to disable this guard.
 
 To enable the plugin for a team repository, commit these project settings:
 
