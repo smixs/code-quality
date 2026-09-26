@@ -145,6 +145,15 @@ describe("tamper/test-deleted", () => {
     expect(rules(repo)).toContain("tamper/test-deleted");
   });
 
+  test("does not read a regex .test(x) call or a method named it() as a test header", () => {
+    const repo = tsRepo({
+      "src/value.test.ts": 'test("policy", () => {\n  expect(PATTERN.test(String(text))).toBe(false);\n  expect(api.it(1)).toBe(1);\n});\n',
+    });
+    write(repo, "src/value.test.ts", 'test("policy", () => {\n  expect(PATTERN.test(String(texts.ru))).toBe(false);\n  expect(api.it(2)).toBe(2);\n});\n');
+    git(repo, "add", "-A");
+    expect(rules(repo)).not.toContain("tamper/test-deleted");
+  });
+
   test("allows a descriptive title rename for the same test", () => {
     const repo = tsRepo({
       "src/value.test.ts": 'test("catalog sections share one screen with a toggle", () => {\n  expect(value).toEqual(1);\n});\n',

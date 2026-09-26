@@ -103,7 +103,8 @@ const patterns = (test: string[], assert: string[], ...flags: [string[], string[
 });
 
 const JS_TEST = patterns(
-  ["\\b(?:it|test|describe)\\s*\\("],
+  // A header starts a statement: `re.test(x)`, `obj.it(...)` or `describe_(...)` is not a test block.
+  ["(?<![.\\w$])(?:it|test|describe)\\s*\\("],
   ["\\bexpect\\s*\\(", "\\bassert(?:\\.[A-Za-z]+)?\\s*\\("],
   ["\\.(?:skip|todo)\\s*\\(", "\\b(?:xit|xdescribe)\\s*\\("],
   ["\\.only\\s*\\("],
