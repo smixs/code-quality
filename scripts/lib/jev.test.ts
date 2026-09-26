@@ -270,107 +270,211 @@ describe("jev spec_incomplete", () => {
   }, 60_000);
 });
 
-const UX = 'ux_globs = ["apps/admin/**/*.tsx"]\ni18n_globs = ["apps/*/src/i18n/*.ts"]\nchange_untested = false\nspec_incomplete = false';
+const UX = 'ux_globs = ["src/ui/**/*.tsx"]\ni18n_globs = ["src/i18n/*.ts"]\nchange_untested = false\nspec_incomplete = false';
+const SCREEN = "src/ui/Screen.tsx";
+
+// A one-file change: before is committed, before + added is staged.
+function oneFile(file: string, added: string, review: string, before = "export const x = 1;\n") {
+  return stagedRepo({ [file]: before }, { [file]: `${before}${added}\n` }, review);
+}
+
+// The question is asked in one request with the others its trigger found; the note names file and line.
+async function expectAsked(o: ReturnType<typeof stagedRepo>, id: string, file: string) {
+  const calls: Call[] = [];
+  const lines = await jevNotes(o, changes(o), { env: KEY, post: answering(calls, { [id]: { noul: 0.7 } }) });
+  expect(asked(calls)).toHaveLength(1);
+  expect(asked(calls)[0]).toContain(id);
+  expect(Object.keys(calls[0].body.state)[0]).toBe("file");
+  expect(notes(lines).find((l) => l.includes(` ${id} `))).toMatch(new RegExp(`^note: jev ${id} p=0\\.70 >= 0\\.7  ${file.replace(/\./g, "\\.")}:\\+\\d+  [a-z]`));
+}
 
 describe("jev UX pack", () => {
-  // Each snippet is the added part of apps/admin/src/Screen.tsx and must trigger its question.
+  // Each snippet is the added part of src/ui/Screen.tsx and must trigger its question.
   const cases: [string, string][] = [
-    ["hint_as_visible_text", '<Label>Tax</Label>\n<HelpText>Taken from the receipt.</HelpText>'],
     ["hardcoded_color", '<div className="bg-[#ff0000]" />'],
-    ["jargon_in_owner_ui", "<p>Paste the Chat ID here</p>"],
+    ["jargon_in_ui", "<p>Paste the Chat ID here</p>"],
     ["text_not_plain", '<p title="The value that has been entered here will be used by the system for all of the future orders">x</p>'],
-    ["metric_without_deeplink", '<Card><CardTitle>Analytics</CardTitle><span>{total}</span></Card>'],
+    ["metric_without_deeplink", "<Card><CardTitle>Analytics</CardTitle><span>{total}</span></Card>"],
     ["mobile_not_handled", '<div className="grid grid-cols-4 gap-2" />'],
     ["raw_error_shown", "{error.message}"],
     ["empty_state_dead_end", "{items.length === 0 && <p>{t.none}</p>}"],
   ];
   for (const [id, added] of cases) {
-    test(`${id}: its trigger asks it, the note is in Russian with file and line`, async () => {
-      const o = stagedRepo({ "apps/admin/src/Screen.tsx": "export const x = 1;\n" }, { "apps/admin/src/Screen.tsx": `export const x = 1;\n${added}\n` }, UX);
+    test(`${id}: its trigger asks it; the note has file, line and meaning`, async () => {
+      const o = oneFile(SCREEN, added, UX);
       const calls: Call[] = [];
       const lines = await jevNotes(o, changes(o), { env: KEY, post: answering(calls, { [id]: { noul: 0.7 } }) });
       expect(asked(calls)).toHaveLength(1);
       expect(asked(calls)[0]).toContain(id);
       expect(Object.keys(calls[0].body.state).slice(0, 1)).toEqual(["file"]);
-      expect(notes(lines).find((l) => l.includes(` ${id} `))).toMatch(new RegExp(`^note: jev ${id} p=0\\.70 >= 0\\.7  apps/admin/src/Screen\\.tsx:\\+\\d+  [а-яё]`));
+      expect(notes(lines).find((l) => l.includes(` ${id} `))).toMatch(new RegExp(`^note: jev ${id} p=0\\.70 >= 0\\.7  src/ui/Screen\\.tsx:\\+\\d+  [a-z]`));
     }, 60_000);
   }
 
   test("a plain logic hunk triggers no UX question, and nothing is asked without ux_globs", async () => {
-    const o = stagedRepo({ "apps/admin/src/Screen.tsx": "export const x = 1;\n" }, { "apps/admin/src/Screen.tsx": "export const x = 1;\nexport const y = (a: number) => a * 2;\n" }, UX);
     const calls: Call[] = [];
+    const o = oneFile(SCREEN, "export const y = (a: number) => a * 2;", UX);
     await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
-    const off = stagedRepo({ "apps/admin/src/Screen.tsx": "export const x = 1;\n" }, { "apps/admin/src/Screen.tsx": '<div className="bg-[#ff0000]" />\n' }, "change_untested = false");
+    const off = oneFile(SCREEN, '<div className="bg-[#ff0000]" />', "change_untested = false");
     await jevNotes(off, changes(off), { env: KEY, post: answering(calls) });
     expect(calls).toEqual([]);
   }, 60_000);
 
-  test("UX hunks go first under jev_max_states; render harnesses and stories get no question", async () => {
+  test("pack hunks go first under jev_max_states; render harnesses and stories get no question", async () => {
     const color = '<div className="bg-[#ff0000]" />\n';
-    const before = { ...SUM_BEFORE, "apps/admin/src/Screen.tsx": "\n", "apps/admin/src/Screen.render-harness.tsx": "\n", "apps/admin/src/Screen.stories.tsx": "\n" };
-    const after = { ...SUM_AFTER, "apps/admin/src/Screen.tsx": color, "apps/admin/src/Screen.render-harness.tsx": color, "apps/admin/src/Screen.stories.tsx": color };
-    const o = stagedRepo(before, after, 'ux_globs = ["apps/admin/**/*.tsx"]\nspec_incomplete = false\njev_max_states = 1');
+    const before = { ...SUM_BEFORE, [SCREEN]: "\n", "src/ui/Screen.render-harness.tsx": "\n", "src/ui/Screen.stories.tsx": "\n" };
+    const after = { ...SUM_AFTER, [SCREEN]: color, "src/ui/Screen.render-harness.tsx": color, "src/ui/Screen.stories.tsx": color };
+    const o = stagedRepo(before, after, 'ux_globs = ["src/ui/**/*.tsx"]\nspec_incomplete = false\njev_max_states = 1');
     const calls: Call[] = [];
     const lines = await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
-    expect(calls.map((c) => c.body.state.file)).toEqual(["apps/admin/src/Screen.tsx"]);
+    expect(calls.map((c) => c.body.state.file)).toEqual([SCREEN]);
     expect(lines).toContain("jev: asked 1 of 2 hunks (jev_max_states)");
   }, 60_000);
 
-  test("open_button_instead_of_row_click is asked only in a file with a table", async () => {
-    const table = "<Table><TableRow /></Table>\n";
-    const o = stagedRepo({ "apps/admin/src/Orders.tsx": table }, { "apps/admin/src/Orders.tsx": `${table}<Button>Открыть</Button>\n` }, UX);
+  test("semantic color classes and design tokens do not ask hardcoded_color", async () => {
+    const o = oneFile(SCREEN, '<div className="bg-primary text-muted-foreground border-[var(--line)]" />', UX);
     const calls: Call[] = [];
     await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
-    expect(asked(calls).flat()).toContain("open_button_instead_of_row_click");
+    expect(asked(calls).flat()).not.toContain("hardcoded_color");
   }, 60_000);
 
   test("duplicate_control sends the other lines with the same label", async () => {
-    const before = '<Button onClick={save}>Save</Button>\n<p>form</p>\n';
-    const o = stagedRepo({ "apps/admin/src/Form.tsx": before }, { "apps/admin/src/Form.tsx": `${before}<Button onClick={save}>Save</Button>\n` }, UX);
+    const before = "<Button onClick={save}>Save</Button>\n<p>form</p>\n";
+    const o = oneFile("src/ui/Form.tsx", "<Button onClick={save}>Save</Button>", UX, before);
     const calls: Call[] = [];
     await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
     expect(asked(calls)[0]).toContain("duplicate_control");
-    expect(calls[0].body.state.same_label_lines).toEqual(["apps/admin/src/Form.tsx:1: <Button onClick={save}>Save</Button>"]);
+    expect(calls[0].body.state.same_label_lines).toEqual(["src/ui/Form.tsx:1: <Button onClick={save}>Save</Button>"]);
   }, 60_000);
 
   test("feature_not_wired: a component only its test names is asked with the references; a rendered one is not", async () => {
     const screen = "export function NewScreen() {\n  return <div />;\n}\n";
-    const lonely = stagedRepo({ "apps/admin/src/App.tsx": "export const App = 1;\n" }, {
-      "apps/admin/src/NewScreen.tsx": screen,
-      "apps/admin/src/NewScreen.test.tsx": 'import { NewScreen } from "./NewScreen";\nNewScreen();\n',
+    const lonely = stagedRepo({ "src/ui/App.tsx": "export const App = 1;\n" }, {
+      "src/ui/NewScreen.tsx": screen,
+      "src/ui/NewScreen.test.tsx": 'import { NewScreen } from "./NewScreen";\nNewScreen();\n',
     }, UX);
     const calls: Call[] = [];
     await jevNotes(lonely, changes(lonely), { env: KEY, post: answering(calls) });
     const wiring = calls.find((c) => "feature_not_wired" in c.body.questions)!;
-    expect(wiring.body.state.references).toEqual(['apps/admin/src/NewScreen.test.tsx:1: import { NewScreen } from "./NewScreen";', "apps/admin/src/NewScreen.test.tsx:2: NewScreen();"]);
-    const wired = stagedRepo({ "apps/admin/src/App.tsx": "export const App = 1;\n" }, {
-      "apps/admin/src/NewScreen.tsx": screen,
-      "apps/admin/src/App.tsx": 'import { NewScreen } from "./NewScreen";\nexport const App = () => <NewScreen />;\n',
+    expect(wiring.body.state.references).toEqual(['src/ui/NewScreen.test.tsx:1: import { NewScreen } from "./NewScreen";', "src/ui/NewScreen.test.tsx:2: NewScreen();"]);
+    const wired = stagedRepo({ "src/ui/App.tsx": "export const App = 1;\n" }, {
+      "src/ui/NewScreen.tsx": screen,
+      "src/ui/App.tsx": 'import { NewScreen } from "./NewScreen";\nexport const App = () => <NewScreen />;\n',
     }, UX);
     const quiet: Call[] = [];
     await jevNotes(wired, changes(wired), { env: KEY, post: answering(quiet) });
-    expect(quiet.filter((c) => c.body.state.file === "apps/admin/src/NewScreen.tsx").map((c) => Object.keys(c.body.questions)).flat()).not.toContain("feature_not_wired");
+    expect(quiet.filter((c) => c.body.state.file === "src/ui/NewScreen.tsx").map((c) => Object.keys(c.body.questions)).flat()).not.toContain("feature_not_wired");
   }, 60_000);
 
-  test("dictionaries: an Uzbek file asks uz_literal_ru, a Russian one does not", async () => {
-    const o = stagedRepo({ "apps/admin/src/i18n/uz.ts": "export const uz = {};\n", "apps/admin/src/i18n/ru.ts": "export const ru = {};\n" }, {
-      "apps/admin/src/i18n/uz.ts": 'export const uz = {\n  save: "Сохранить",\n};\n',
-      "apps/admin/src/i18n/ru.ts": 'export const ru = {\n  save: "Сохранить",\n};\n',
+  test("untranslated_text is asked on dictionary files only", async () => {
+    const o = stagedRepo({ "src/i18n/de.ts": "export const de = {};\n", "src/ui/Save.tsx": "export const x = 1;\n" }, {
+      "src/i18n/de.ts": 'export const de = {\n  save: "Save changes",\n};\n',
+      "src/ui/Save.tsx": 'export const x = 1;\nexport const label = "Save changes";\n',
     }, UX);
     const calls: Call[] = [];
     await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
     const byFile = Object.fromEntries(calls.map((c) => [c.body.state.file, Object.keys(c.body.questions)]));
-    expect(byFile["apps/admin/src/i18n/uz.ts"]).toContain("uz_literal_ru");
-    expect(byFile["apps/admin/src/i18n/ru.ts"]).not.toContain("uz_literal_ru");
+    expect(byFile["src/i18n/de.ts"]).toContain("untranslated_text");
+    expect(byFile["src/ui/Save.tsx"] ?? []).not.toContain("untranslated_text");
   }, 60_000);
 
   test("ux_off switches questions off; an unknown id is one not-available line", async () => {
-    const files = { "apps/admin/src/Screen.tsx": '<div className="bg-[#ff0000]" />\n' };
-    const o = stagedRepo({ "apps/admin/src/Screen.tsx": "\n" }, files, `${UX}\nux_off = ["hardcoded_color"]`);
+    const o = oneFile(SCREEN, '<div className="bg-[#ff0000]" />', `${UX}\nux_off = ["hardcoded_color"]`);
     const calls: Call[] = [];
     await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
     expect(asked(calls).flat()).not.toContain("hardcoded_color");
-    const bad = stagedRepo({ "apps/admin/src/Screen.tsx": "\n" }, files, `${UX}\nux_off = ["colour"]`);
+    const bad = oneFile(SCREEN, '<div className="bg-[#ff0000]" />', `${UX}\nux_off = ["colour"]`);
     expect(await jevNotes(bad, changes(bad), { env: KEY, post: answering([]) })).toEqual(["jev: not available (unknown review.ux_off id(s) colour)"]);
   }, 60_000);
+});
+
+const AGENT = 'agent_globs = ["agent/**/*.ts"]\nagent_prompt_globs = ["agent/prompts/**/*.md"]\nchange_untested = false\nspec_incomplete = false';
+
+describe("jev agent pack", () => {
+  // [question, file, added lines]: each must trigger its question.
+  const cases: [string, string, string][] = [
+    ["silent_failure", "agent/reply.ts", "try { await send(chat, text); } catch { return null; }"],
+    ["unbounded_turn", "agent/loop.ts", "while (true) { await step(); }"],
+    ["secrets_in_logs", "agent/log.ts", "console.error(JSON.stringify(process.env));"],
+    ["update_without_rollback", "agent/runtime.ts", 'await symlink(next, "current");'],
+    ["update_without_rollback", "agent/update.ts", "await swap(next);"],
+    ["event_without_dedup", "agent/inbox.ts", "const id = update.message_id; await handle(update);"],
+    ["state_overwrite_instead_of_append", "agent/memory.ts", "await writeFile(notesPath, summary);"],
+    ["prompt_depends_on_environment", "agent/prompts/night.md", "Read the rules in docs/rules.md before you start."],
+    ["prompt_depends_on_environment", "agent/turn.ts", "const prompt = `Use the skill ${name}`;"],
+    ["per_vendor_branch", "agent/turn.ts", 'if (provider === "claude") retries = 3;'],
+    ["user_text_quality", "agent/chat.ts", "await sendMessage(chat, `Failed: ${err.stack}`);"],
+  ];
+  for (const [id, file, added] of cases) {
+    test(`${id} in ${file}: its trigger asks it; the note has file, line and meaning`, async () => {
+      await expectAsked(oneFile(file, added, AGENT, "\n"), id, file);
+    }, 60_000);
+  }
+
+  test("provider files may branch on a provider; files outside agent_globs are not asked", async () => {
+    const calls: Call[] = [];
+    const own = oneFile("agent/providers.ts", 'if (provider === "claude") retries = 3;', AGENT, "\n");
+    await jevNotes(own, changes(own), { env: KEY, post: answering(calls) });
+    expect(asked(calls).flat()).not.toContain("per_vendor_branch");
+    const outside = oneFile("lib/loop.ts", "while (true) { await step(); }", AGENT, "\n");
+    const none: Call[] = [];
+    await jevNotes(outside, changes(outside), { env: KEY, post: answering(none) });
+    expect(none).toEqual([]);
+  }, 60_000);
+
+  test("agent_off switches questions off; an unknown id is one not-available line", async () => {
+    const o = oneFile("agent/loop.ts", "while (true) { await step(); }", `${AGENT}\nagent_off = ["unbounded_turn"]`, "\n");
+    const calls: Call[] = [];
+    await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
+    expect(asked(calls).flat()).not.toContain("unbounded_turn");
+    const bad = oneFile("agent/loop.ts", "while (true) {}", `${AGENT}\nagent_off = ["loops"]`, "\n");
+    expect(await jevNotes(bad, changes(bad), { env: KEY, post: answering([]) })).toEqual(["jev: not available (unknown review.agent_off id(s) loops)"]);
+  }, 60_000);
+});
+
+const PROJECT_Q = `change_untested = false
+spec_incomplete = false
+[[review.jev_questions]]
+id = "raw_sql"
+files = ["src/**/*.ts"]
+trigger = "\\\\b(?:SELECT|INSERT|UPDATE|DELETE)\\\\b"
+instructions = "Does the code added in \`source_hunk\` build an SQL statement by string concatenation instead of the project's query builder?"
+criteria = { true = "An added SQL statement is concatenated or interpolated from values.", false = "SQL goes through the query builder or bound parameters." }
+note = "SQL is built by hand"
+threshold = 0.6`;
+
+describe("jev project questions", () => {
+  test("a [[review.jev_questions]] entry is asked when its glob and trigger match, with its own threshold", async () => {
+    const o = oneFile("src/db.ts", "const q = `SELECT * FROM t WHERE id = ${id}`;", PROJECT_Q);
+    const calls: Call[] = [];
+    const lines = await jevNotes(o, changes(o), { env: KEY, post: answering(calls, { raw_sql: { noul: 0.6 } }) });
+    expect(asked(calls)).toEqual([["raw_sql"]]);
+    expect(calls[0].body.questions.raw_sql.criteria.true).toBe("An added SQL statement is concatenated or interpolated from values.");
+    expect(notes(lines)).toEqual(["note: jev raw_sql p=0.60 >= 0.6  src/db.ts:+2  SQL is built by hand"]);
+    expect(logOf(o.repo).map((r) => [r.question, r.noted])).toEqual([["raw_sql", true]]);
+  }, 60_000);
+
+  test("no trigger match, another file or a test file: not asked", async () => {
+    const calls: Call[] = [];
+    for (const [file, added] of [["src/db.ts", "const n = 1;"], ["lib/db.ts", "const q = `SELECT 1`;"], ["src/db.test.ts", "const q = `SELECT 1`;"]]) {
+      const o = oneFile(file, added, PROJECT_Q);
+      await jevNotes(o, changes(o), { env: KEY, post: answering(calls) });
+    }
+    expect(asked(calls).flat()).not.toContain("raw_sql");
+  }, 60_000);
+
+  const broken: [string, string][] = [
+    ['id = "textual_test"\nfiles = ["src/**"]\ninstructions = "q?"\ncriteria = { true = "y", false = "n" }\nnote = "n"', "review.jev_questions[0]: id textual_test must be snake_case and unique among all Jev questions"],
+    ['id = "x"\nfiles = ["src/**"]\ninstructions = "q?"\ncriteria = { true = "y" }\nnote = "n"', "review.jev_questions[0].criteria: false must be a non-empty string"],
+    ['id = "x"\nfiles = ["src/**"]\ntrigger = "("\ninstructions = "q?"\ncriteria = { true = "y", false = "n" }\nnote = "n"', "review.jev_questions[0]: trigger is not a regular expression"],
+    ['id = "x"\nfiles = []\ninstructions = "q?"\ncriteria = { true = "y", false = "n" }\nnote = "n"', "review.jev_questions[0]: files must be a non-empty list of globs"],
+  ];
+  for (const [entry, reason] of broken) {
+    test(`a malformed entry is one not-available line: ${reason.split(": ")[1]}`, async () => {
+      const o = oneFile("src/db.ts", "const q = 1;", `change_untested = false\n[[review.jev_questions]]\n${entry}`);
+      const lines = await jevNotes(o, changes(o), { env: KEY, post: answering([]) });
+      expect(lines).toHaveLength(1);
+      expect(lines[0].startsWith(`jev: not available (${reason}`)).toBe(true);
+    }, 60_000);
+  }
 });

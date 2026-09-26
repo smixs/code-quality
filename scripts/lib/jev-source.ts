@@ -1,11 +1,14 @@
-// Questions on changed source hunks: change_untested on every hunk that changes behaviour, and the
-// UX pack (jev-ux.ts) on hunks of files in [review] ux_globs and i18n_globs. All applicable
-// questions of one hunk go in one request; the state has only the fields they read.
+// Questions on changed source hunks: change_untested on every hunk that changes behaviour, the UX
+// pack (jev-ux.ts, [review] ux_globs / i18n_globs), the agent pack (jev-agent.ts, agent_globs /
+// agent_prompt_globs) and project questions (jev-custom.ts, [[review.jev_questions]]). All
+// applicable questions of one hunk go in one request; the state has only the fields they read.
 import { basename } from "node:path";
 import type { Opts } from "./config.ts";
 import type { Changes } from "./diff.ts";
-import { addedOf, bodyOf, clip, clippedList, fitState, type Hunk, hunksOf, type JevCtx, MAX_STATE_CHARS, packTexts, type QBase, type Req, type Review } from "./jev-hunks.ts";
-import { type Hit, UX_QUESTIONS, type UxContext, uxContext, type UxQ } from "./jev-ux.ts";
+import { AGENT_QUESTIONS } from "./jev-agent.ts";
+import { customKind, customQuestions } from "./jev-custom.ts";
+import { addedOf, bodyOf, clip, clippedList, fitState, type Hit, type HitContext, hitContext, type Hunk, hunksOf, type JevCtx, MAX_STATE_CHARS, packTexts, type PackQ, type QBase, type Req, type Review } from "./jev-hunks.ts";
+import { UX_QUESTIONS } from "./jev-ux.ts";
 import { adapterForFile, isTestFile } from "./lang.ts";
 import { globMatch } from "./util.ts";
 
@@ -47,45 +50,47 @@ function behaviourLines(h: Hunk) {
 
 // ---- which files each question reads
 
-type Kinds = { code: (f: string) => boolean; ux: (f: string) => boolean; i18n: (f: string) => boolean };
+// A pack: its enabled questions and the file kinds they read (ux/i18n, code/prompt, one per project question).
+type Pack = { qs: PackQ[]; kinds: Record<string, (f: string) => boolean> };
 
 const list = (r: Review, key: string) => (Array.isArray(r[key]) ? (r[key] as unknown[]).map(String) : []);
 
 // Test support that the test patterns do not name: render harnesses, stories, fixtures, mocks.
 const SUPPORT = /[.-](?:\w+-)?harness\.|\.stories\.|(?:^|\/)(?:fixtures?|__mocks__)\//;
 
-function kindsOf(o: Opts, r: Review): Kinds {
-  const test = (f: string) => isTestFile(o.langs, f) || SUPPORT.test(f);
-  const i18n = (f: string) => globMatch(list(r, "i18n_globs"), f) && !test(f);
-  return {
-    code: (f) => r.change_untested === true && Boolean(adapterForFile(o.langs, f)) && !test(f) && !i18n(f),
-    ux: (f) => globMatch(list(r, "ux_globs"), f) && !test(f),
-    i18n,
-  };
+function enabled(r: Review, key: string, qs: PackQ[]) {
+  const off = list(r, key);
+  const unknown = off.filter((id) => !qs.some((q) => q.id === id));
+  if (unknown.length) throw new Error(`unknown review.${key} id(s) ${unknown.join(", ")}`);
+  return qs.filter((q) => !off.includes(q.id));
 }
 
-function enabledUx(r: Review) {
-  const off = list(r, "ux_off");
-  const unknown = off.filter((id) => !UX_QUESTIONS.some((q) => q.id === id));
-  if (unknown.length) throw new Error(`unknown review.ux_off id(s) ${unknown.join(", ")}`);
-  return UX_QUESTIONS.filter((q) => !off.includes(q.id));
+function packsOf(r: Review, test: (f: string) => boolean, taken: string[]): Pack[] {
+  const glob = (key: string) => (f: string) => globMatch(list(r, key), f) && !test(f);
+  const custom = customQuestions(r, [...taken, CHANGE_UNTESTED.id, ...UX_QUESTIONS.map((q) => q.id), ...AGENT_QUESTIONS.map((q) => q.id)]);
+  return [
+    { qs: enabled(r, "ux_off", UX_QUESTIONS), kinds: { ux: glob("ux_globs"), i18n: glob("i18n_globs") } },
+    { qs: enabled(r, "agent_off", AGENT_QUESTIONS), kinds: { code: glob("agent_globs"), prompt: glob("agent_prompt_globs") } },
+    { qs: custom.qs, kinds: Object.fromEntries(custom.qs.map((q) => [q.id, (f: string) => customKind(custom, f, q.id) && !test(f)])) },
+  ];
 }
 
-const reads = (q: UxQ, k: Kinds, file: string) => (q.on !== "i18n" && k.ux(file)) || (q.on !== "ux" && k.i18n(file));
+const inPack = (p: Pack, f: string) => Object.values(p.kinds).some((kind) => kind(f));
+const reads = (p: Pack, q: PackQ, f: string) => (q.on === "both" ? inPack(p, f) : Boolean(p.kinds[q.on]?.(f)));
 
 // ---- requests
 
 type Asked = Hit & { q: QBase };
-type SrcCtx = { k: Kinds; uxQs: UxQ[]; uc: UxContext };
+type SrcCtx = { code: (f: string) => boolean; packs: Pack[]; hc: HitContext };
 
 function askedOf(h: Hunk, c: SrcCtx): Asked[] {
-  const first = c.k.code(h.file) ? behaviourLines(h)[0] : undefined;
+  const first = c.code(h.file) ? behaviourLines(h)[0] : undefined;
   const untested = first ? [{ q: CHANGE_UNTESTED, at: first.at }] : [];
-  const ux = c.uxQs.filter((q) => reads(q, c.k, h.file)).flatMap((q) => {
-    const hit = q.hit(h, c.uc);
+  const packs = c.packs.flatMap((p) => p.qs.filter((q) => reads(p, q, h.file))).flatMap((q) => {
+    const hit = q.hit(h, c.hc);
     return hit ? [{ q, ...hit }] : [];
   });
-  return [...untested, ...ux];
+  return [...untested, ...packs];
 }
 
 const stem = (f: string) => basename(f).split(".")[0].toLowerCase().replace(/^test_|_test$|_spec$/, "");
@@ -112,17 +117,22 @@ function requestOf(model: string, h: Hunk, asked: Asked[], tests: Hunk[]): Req {
 }
 
 // --all has no change to hold a test against, and would ask about every file of the repo.
-export function sourceRequests(ctx: JevCtx, tests: Hunk[]): Req[] {
+// taken: ids of the test-hunk questions, which project questions may not reuse.
+export function sourceRequests(ctx: JevCtx, tests: Hunk[], taken: string[]): Req[] {
   if (ctx.o.scope.kind === "all") return [];
-  const k = kindsOf(ctx.o, ctx.r);
-  const files = [...ctx.ch.keys()].filter((f) => k.code(f) || k.ux(f) || k.i18n(f)).sort();
+  const test = (f: string) => isTestFile(ctx.o.langs, f) || SUPPORT.test(f);
+  const packs = packsOf(ctx.r, test, taken);
+  const i18n = packs[0].kinds.i18n;
+  const code = (f: string) => ctx.r.change_untested === true && Boolean(adapterForFile(ctx.o.langs, f)) && !test(f) && !i18n(f);
+  const files = [...ctx.ch.keys()].filter((f) => code(f) || packs.some((p) => inPack(p, f))).sort();
   if (!files.length) return [];
-  const c: SrcCtx = { k, uxQs: enabledUx(ctx.r), uc: uxContext(ctx.o, k.i18n) };
+  const kind = (f: string, name: string) => packs.some((p) => Boolean(p.kinds[name]?.(f)));
+  const c: SrcCtx = { code, packs, hc: hitContext(ctx.o, kind, sourceFiles(ctx.o, ctx.ch)) };
   const reqs = hunksOf(ctx.o, ctx.ch, files).flatMap((h) => {
     const asked = askedOf(h, c);
     return asked.length ? [requestOf(ctx.model, h, asked, tests)] : [];
   });
-  // Hunks with UX questions go first: when jev_max_states cuts, it cuts plain change_untested hunks.
-  const withUx = (x: Req) => x.qs.some((q) => q !== CHANGE_UNTESTED);
-  return [...reqs.filter(withUx), ...reqs.filter((x) => !withUx(x))];
+  // Hunks with pack or project questions go first: jev_max_states then cuts plain change_untested hunks.
+  const withPack = (x: Req) => x.qs.some((q) => q !== CHANGE_UNTESTED);
+  return [...reqs.filter(withPack), ...reqs.filter((x) => !withPack(x))];
 }

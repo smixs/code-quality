@@ -108,9 +108,32 @@ change_untested_threshold = 0.5
 # spec = "docs/specs/task.md"
 spec_incomplete = true
 spec_incomplete_threshold = 0.7
-# UX pack on interface files and text dictionaries; both lists empty = off.
-# ux_globs = ["apps/admin/**/*.tsx", "apps/webapp/**/*.tsx"]
-# i18n_globs = ["apps/*/src/i18n/dictionaries/*.ts"]
+# UX pack on interface files and translation dictionaries; both lists empty = off.
+# ux_globs = ["src/components/**/*.tsx", "src/pages/**/*.tsx"]
+# i18n_globs = ["src/i18n/*.json"]
 # ux_off = ["mobile_not_handled"]
 ux_threshold = 0.7
+# Agent pack for AI assistant and agent code: code globs and prompt/instruction globs; empty = off.
+# agent_globs = ["agent/**/*.ts"]
+# agent_prompt_globs = ["agent/prompts/**/*.md"]
+# agent_off = ["per_vendor_branch"]
+agent_threshold = 0.7
 llm = false
+
+# Project questions: rules of this repository that no built-in question covers. Asked on hunks of
+# files matching `files` (tests excluded) with an added line matching `trigger`. Adapt or delete.
+[[review.jev_questions]]
+id = "hint_as_visible_text"
+files = ["src/components/**/*.tsx"]
+trigger = "<(?:HelpText|FormDescription|FieldDescription)\\b"
+instructions = "Does `source_hunk` add an explanation of a field, card or switch as permanent visible text next to it, instead of behind an information icon with a tooltip or popover?"
+criteria = { true = "An added description explains what a control is, where its value comes from or what it does, and it is always visible.", false = "The explanation sits behind an information icon, or the visible text warns about an irreversible action or states a format limit." }
+note = "a field explanation is visible text, not behind an info icon"
+
+[[review.jev_questions]]
+id = "open_button_instead_of_row_click"
+files = ["src/components/**/*.tsx", "src/pages/**/*.tsx"]
+trigger = ">\\s*Open\\s*<|[\"']Open[\"']|<Dialog\\b"
+instructions = "Does `source_hunk` open a table record through a separate Open button or a modal Dialog instead of a click on the row that opens a side sheet?"
+criteria = { true = "The hunk adds an Open button, an actions column with only Open, or a Dialog to view or edit a table record.", false = "Rows open a side sheet on click, or the Dialog only confirms a destructive action, or no table record is opened." }
+note = "a table record opens by an Open button or a Dialog, not by a row click"

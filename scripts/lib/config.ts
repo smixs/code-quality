@@ -68,6 +68,13 @@ export const DEFAULTS = {
     i18n_globs: [] as string[],
     ux_off: [] as string[],
     ux_threshold: 0.7,
+    // Agent pack (jev-agent.ts): code globs and prompt/instruction globs; both empty = off.
+    agent_globs: [] as string[],
+    agent_prompt_globs: [] as string[],
+    agent_off: [] as string[],
+    agent_threshold: 0.7,
+    // Project questions, [[review.jev_questions]] tables (jev-custom.ts).
+    jev_questions: [] as Record<string, unknown>[],
   },
 };
 

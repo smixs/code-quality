@@ -90,7 +90,7 @@ Every bypass needs a reason and leaves a `note: bypass <rule> <source> <reason>`
 
 ## Jev
 
-An optional classifier: five yes/no questions on added test hunks, `change_untested` on changed source hunks, `spec_incomplete` against `[review] spec` or `$QG_SPEC`, and an opt-in UX pack (`[review] ux_globs`, `i18n_globs`); calibrated probabilities, notes only, `[review] jev = true` plus a key: `TYPESAFE_API_KEY` for the TypeSafe API or `OPENROUTER_API_KEY` for OpenRouter, picked by `[review] jev_provider` (default `auto`). Details: [references/jev.md](references/jev.md).
+An optional classifier: five yes/no questions on added test hunks, `change_untested` on changed source hunks, `spec_incomplete` against `[review] spec` or `$QG_SPEC`, opt-in UX and agent packs (`[review] ux_globs`, `agent_globs`) and project questions (`[[review.jev_questions]]`); calibrated probabilities, notes only, `[review] jev = true` plus a key: `TYPESAFE_API_KEY` for the TypeSafe API or `OPENROUTER_API_KEY` for OpenRouter, picked by `[review] jev_provider` (default `auto`). Details: [references/jev.md](references/jev.md).
 
 ## Common mistakes
 

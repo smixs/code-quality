@@ -1,13 +1,14 @@
 // Jev review notes: Noul questions asked through a Jev provider (TypeSafe direct, OpenRouter, or a
-// custom endpoint with the same contract): five on added test hunks (here), change_untested and the
-// UX pack on changed source hunks (jev-source.ts), spec_incomplete on the whole change (jev-spec.ts).
+// custom endpoint with the same contract): five on added test hunks (here), change_untested, the UX
+// and agent packs and project questions on changed source hunks (jev-source.ts), spec_incomplete on
+// the whole change (jev-spec.ts).
 // Notes only: nothing here can change the verdict. Any failure is one "jev: not available (<reason>)"
 // line, never a silent pass. Every verdict goes to jev-log.jsonl.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";
 import { addedLines, type Changes } from "./diff.ts";
-import { bodyOf, clip, clippedList, type Hunk, hunksOf, type JevCtx, MAX_STATE_CHARS, type QBase, type Req, type Review } from "./jev-hunks.ts";
+import { bodyOf, clip, clippedList, type Hunk, hunksOf, type JevCtx, MAX_STATE_CHARS, type QBase, type Req, type Review, thresholdOf } from "./jev-hunks.ts";
 import { sourceFiles, sourceRequests } from "./jev-source.ts";
 import { specRequests } from "./jev-spec.ts";
 import { adapterForFile, isTestFile, matchesTestPattern } from "./lang.ts";
@@ -268,7 +269,7 @@ function reasonOf(e: unknown) {
 }
 
 const noted = (v: Verdict, r: Review) => {
-  const t = Number(r[v.q.threshold]);
+  const t = thresholdOf(v.q, r);
   return v.q.below ? v.p < t : v.p >= t;
 };
 
@@ -277,7 +278,7 @@ const place = (v: Verdict) => (v.at ? `${v.hunk.file}:${v.at}` : v.hunk.file);
 function noteLine(v: Verdict, r: Review) {
   const side = v.q.below ? "<" : ">=";
   const tail = [v.why && `: ${v.why}`, v.suffix && ` (${v.suffix})`].filter(Boolean).join("");
-  return `note: jev ${v.q.id} p=${v.p.toFixed(2)} ${side} ${r[v.q.threshold]}  ${place(v)}  ${v.q.label}${tail}`;
+  return `note: jev ${v.q.id} p=${v.p.toFixed(2)} ${side} ${thresholdOf(v.q, r)}  ${place(v)}  ${v.q.label}${tail}`;
 }
 
 // A cut state is said even when the answer is not a note: the probability covers only what was sent.
@@ -317,7 +318,7 @@ async function askAll(ctx: AskCtx, reqs: Req[]) {
 // Hunk requests (test hunks first, then source hunks) share jev_max_states; the spec request is one more.
 function requests(o: Opts, ch: Changes, r: Review, model: string) {
   const tests = testHunks(o, ch);
-  const hunkReqs = [...testRequests({ o, ch, r, model }, tests), ...sourceRequests({ o, ch, r, model }, tests)];
+  const hunkReqs = [...testRequests({ o, ch, r, model }, tests), ...sourceRequests({ o, ch, r, model }, tests, [...QUESTIONS.map((q) => q.id), "spec_incomplete"])];
   const reqs = hunkReqs.slice(0, Number(r.jev_max_states));
   return { reqs, total: hunkReqs.length };
 }

@@ -1,5 +1,7 @@
 // What every Jev question reads: diff hunks with 3 lines of context (a new file is one added hunk),
 // the shared state budget, and the request/verdict shapes. No question lives here.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, diffArgs, WHOLE } from "./diff.ts";
 import { git } from "./util.ts";
@@ -13,7 +15,10 @@ export type Hunk = { file: string; at: string; text: string };
 export type Review = Record<string, unknown>;
 type Noul = { type: "noul"; instructions: string; criteria: { true: string; false: string } };
 // below: a note when p < threshold (the good answer is "yes"); otherwise when p >= threshold.
-export type QBase = { id: string; label: string; below: boolean; fields: string[]; threshold: string; q: Noul };
+// threshold names the [review] key that holds it; limit, when set, is the threshold itself.
+export type QBase = { id: string; label: string; below: boolean; fields: string[]; threshold: string; limit?: number; q: Noul };
+
+export const thresholdOf = (q: QBase, r: Review) => q.limit ?? Number(r[q.threshold]);
 // at: the line a question points to, when it is not the hunk's first line; suffix: said with the verdict.
 export type Req = { hunk: Hunk; qs: QBase[]; body: unknown; at?: Record<string, string>; suffix?: string };
 
@@ -139,3 +144,45 @@ function shorter(items: string[], excess: number) {
   const keep = last.length - excess - 2;
   return keep > 0 ? [...items.slice(0, -1), clip(last, keep)] : items.slice(0, -1);
 }
+
+// ---- question packs (UX, agent): a trigger in code decides whether a hunk is asked at all
+
+// at: the first added line that triggered; state: extra fields the question reads.
+export type Hit = { at: string; state?: Record<string, string[]> };
+// kind: whether a file belongs to one of the pack's file kinds (ux, i18n, code, prompt).
+export type HitContext = { o: Opts; text: (file: string) => string; kind: (file: string, kind: string) => boolean; changed: string[] };
+// on: the file kind the question reads, or "both" for every kind of its pack.
+export type PackQ = QBase & { on: string; hit: (h: Hunk, c: HitContext) => Hit | null };
+
+export function hitContext(o: Opts, kind: HitContext["kind"], changed: string[]): HitContext {
+  const cache = new Map<string, string>();
+  const text = (file: string) => {
+    if (!cache.has(file)) cache.set(file, readOr(join(o.repo, file)));
+    return cache.get(file)!;
+  };
+  return { o, text, kind, changed };
+}
+
+function readOr(path: string) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+export const firstLine = (h: Hunk, re: RegExp): Hit | null => {
+  const line = addedOf(h).find((x) => re.test(x.text));
+  return line ? { at: line.at } : null;
+};
+export const lineHit = (re: RegExp) => (h: Hunk) => firstLine(h, re);
+
+export const noul = (instructions: string, yes: string, no: string) => ({ type: "noul" as const, instructions, criteria: { true: yes, false: no } });
+
+type Head = Pick<PackQ, "id" | "label" | "on" | "hit"> & { extra?: string[] };
+
+// A pack question reads the hunk as `source_hunk`, so it shares a request with change_untested.
+export const packQ = (threshold: string) => (head: Head, q: QBase["q"]): PackQ => {
+  const { extra = [], ...rest } = head;
+  return { ...rest, below: false, fields: ["source_hunk", ...extra], threshold, q };
+};

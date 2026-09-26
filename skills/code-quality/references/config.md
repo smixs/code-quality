@@ -54,7 +54,11 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   = one `jev: spec not set ([review] spec or QG_SPEC)` line and no spec question; `spec_incomplete`
   (`true`) with `spec_incomplete_threshold` (0.7). The UX pack: `ux_globs` and `i18n_globs` (globs of
   interface files and of text dictionaries, both empty = off), `ux_off` (question ids to skip),
-  `ux_threshold` (0.7). `llm` is not wired yet, `true` gives one `note:` line.
+  `ux_threshold` (0.7). The agent pack: `agent_globs` and `agent_prompt_globs` (globs of agent code
+  and of prompts or instructions, both empty = off), `agent_off`, `agent_threshold` (0.7). Project
+  questions: `[[review.jev_questions]]` tables with `id`, `files`, `trigger`, `instructions`,
+  `criteria = { true = "...", false = "..." }`, `note`, optional `threshold` (0.7) and `below`
+  (see the Jev reference). `llm` is not wired yet, `true` gives one `note:` line.
   Reviewers never block.
 
 The list of guarded keys and the rule for changing them together with sources is in

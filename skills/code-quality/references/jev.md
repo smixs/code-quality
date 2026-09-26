@@ -1,10 +1,11 @@
-# Jev: test, change and UX notes (never block)
+# Jev: test, change, UX, agent and project notes (never block)
 
 After the deterministic checks, `check`, `pre-commit` and the Stop adapter ask Jev (a TypeSafe
 classifier). Switch it on with `[review] jev = true` and a key. Code: `scripts/lib/jev.ts` (test
-hunks, providers, output), `scripts/lib/jev-source.ts` (`change_untested`), `scripts/lib/jev-ux.ts`
-(the UX pack), `scripts/lib/jev-spec.ts` (`spec_incomplete`), `scripts/lib/jev-hunks.ts` (hunks and
-the state budget).
+hunks, providers, output), `scripts/lib/jev-source.ts` (`change_untested` and the packs), `scripts/lib/jev-ux.ts`
+(the UX pack), `scripts/lib/jev-agent.ts` (the agent pack), `scripts/lib/jev-custom.ts` (project
+questions), `scripts/lib/jev-spec.ts` (`spec_incomplete`), `scripts/lib/jev-hunks.ts` (hunks, the
+state budget, pack helpers).
 
 ## Two ways to connect
 
@@ -79,35 +80,83 @@ after a colon. `--all` asks neither question: there is no change to hold a test 
 ## UX pack
 
 Asked only on hunks of files in `[review] ux_globs` (interface code, for example
-`["apps/admin/**/*.tsx", "apps/webapp/**/*.tsx"]`) and `[review] i18n_globs` (text dictionaries, for
-example `["apps/*/src/i18n/dictionaries/*.ts"]`); both are empty by default, so the pack is off. Test
-files and test support (`*.render-harness.*`, `*-harness.*`, `*.stories.*`, `fixtures/`, `__mocks__/`)
-never get these questions or `change_untested`. Each question has a trigger in code, so a hunk
-without the matching text costs no request; the note points to the first added line that triggered
-it. The meaning is printed in Russian, for the product owner. One threshold for all: `ux_threshold`
-(0.7, a note at or above it); `ux_off = ["<id>", ...]` switches questions off, an unknown id is a
-`jev: not available` line.
+`["src/components/**/*.tsx"]`) and `[review] i18n_globs` (translation dictionaries, for example
+`["src/i18n/*.json"]`); both are empty by default, so the pack is off. Each question has a trigger in
+code, so a hunk without the matching text costs no request; the note points to the first added line
+that triggered it. One threshold for the pack: `ux_threshold` (0.7, a note at or above it);
+`ux_off = ["<id>", ...]` switches questions off, an unknown id is a `jev: not available` line.
 
 | question | files | trigger (added lines) | note |
 |---|---|---|---|
-| `hint_as_visible_text` | ux | `<HelpText`, `<FormDescription`, `<FieldDescription`, or a muted `<p>`/`<span>` in a hunk with a `Label` | an explanation shown as permanent text instead of behind an information icon (a warning about an irreversible action or a format limit is fine) |
-| `hardcoded_color` | ux | hex, `rgb(`, `hsl(`, `oklch(`, palette classes such as `bg-blue-500`, `text-white`, named colors in `color=` | a literal color instead of a design-system token |
-| `uz_literal_ru` | i18n, file name `uz*` | a string value | an Uzbek dictionary value left in Russian or English |
-| `jargon_in_owner_ui` | ux, i18n | text between tags, `placeholder`/`title`/`label`/`aria-label`/`alt`, a Cyrillic literal; any string in a dictionary | a developer term (code identifier, key, ID, env variable, command, JSON, API, OAuth) in text for the shop owner |
-| `text_not_plain` | ux, i18n | a visible string of 10 or more words | a sentence over 20 words, passive or bureaucratic |
-| `feature_not_wired` | ux | an exported PascalCase function, const or class that no other non-test file uses beyond an import; state adds `references` (every `git grep -w` line naming it) | a new component with no route, menu entry or render |
-| `duplicate_control` | ux | a `Button`, `TabsTrigger`, `SelectItem`, `DropdownMenuItem`, `ToggleGroupItem`, `SidebarMenuButton`, `MenubarItem` or `CommandItem` whose label appears elsewhere in the file; state adds `same_label_lines` | the same action or object reached from two places |
-| `metric_without_deeplink` | ux | `<Card`, `CardTitle`, `type-metric`, `<Stat*`/`<Kpi*`/`<Metric*` in a Dashboard or Analytics file or hunk | a metric that does not open the filtered data behind it |
-| `open_button_instead_of_row_click` | ux | `Открыть`, an `Open` label or `<Dialog`, in a file with a `Table` | a record opened by an Open button or a Dialog instead of a row click and a Sheet |
-| `mobile_not_handled` | ux | an unprefixed `grid-cols-2..12`, `<Table`, a fixed `w-[NNNpx]` | no layout for a 390 px screen |
-| `raw_error_shown` | ux | `error.message`, `.code`, `.status`, `String(err)`, `JSON.stringify(err)` | a raw error instead of a reason in plain words |
-| `empty_state_dead_end` | ux | `.length === 0`, `!x.length`, `Empty`, "nothing found", "ничего не найдено", "пока нет" | an empty state without a next step |
+| `hardcoded_color` | ux | hex, `rgb(`, `hsl(`, `oklch(`, palette classes such as `bg-blue-500`, `text-white`, named colors in `color=` | a color is a literal, not a design token |
+| `untranslated_text` | i18n | a string value | a dictionary value is not in the dictionary's language |
+| `jargon_in_ui` | ux, i18n | text between tags, `placeholder`/`title`/`label`/`aria-label`/`alt`, a literal with a non-ASCII letter; any string in a dictionary | user-facing text uses a developer term |
+| `text_not_plain` | ux, i18n | a visible string of 10 or more words | user-facing text is long, passive or bureaucratic |
+| `feature_not_wired` | ux | an exported PascalCase function, const or class that no other non-test file uses beyond an import; state adds `references` (every `git grep -w` line naming it) | a new component is not wired to a route, menu or render |
+| `duplicate_control` | ux | a `Button`, `TabsTrigger`, `SelectItem`, `DropdownMenuItem`, `ToggleGroupItem`, `SidebarMenuButton`, `MenubarItem` or `CommandItem` whose label appears elsewhere in the file; state adds `same_label_lines` | a control repeats one that is already on this screen |
+| `metric_without_deeplink` | ux | `<Card`, `CardTitle`, `type-metric`, `<Stat*`/`<Kpi*`/`<Metric*` in a dashboard, analytics, metrics or stats file or hunk | a metric does not open the data behind it |
+| `mobile_not_handled` | ux | an unprefixed `grid-cols-2..12`, `<Table`, a fixed `w-[NNNpx]` | the layout has no variant for a narrow screen |
+| `raw_error_shown` | ux | `error.message`, `.code`, `.status`, `String(err)`, `JSON.stringify(err)` | an error is shown raw, not as a reason in plain words |
+| `empty_state_dead_end` | ux | `.length === 0`, `!x.length`, `Empty`, "nothing found", "no results" | an empty state offers no next step |
+
+## Agent pack
+
+For codebases of AI assistants and agents. Asked only on hunks of files in `[review] agent_globs`
+(code, for example `["agent/**/*.ts"]`) and `[review] agent_prompt_globs` (prompts and instructions,
+for example `["agent/prompts/**/*.md"]`); both are empty by default, so the pack is off. One
+threshold: `agent_threshold` (0.7); `agent_off` switches questions off.
+
+| question | files | trigger (added lines) | note |
+|---|---|---|---|
+| `silent_failure` | code | `catch`, `.catch(`, `try {`, `?? null` | an error on a user-facing path is swallowed; neither the user nor the log learns the cause |
+| `unbounded_turn` | code | `while (`, `for await`, `setInterval(`, `setTimeout(`, `retry`, `attempts`, `maxSteps`, `spawn` | a turn, job, retry loop or timer has no limit or no cancel path |
+| `secrets_in_logs` | code | `console.*(`, `log(`, `logger.*(`, `diagnos`, `telemetry`, `JSON.stringify(` of env, headers, auth, message, text, body, prompt | a log, trace or diagnostic bundle carries a secret or the user's own content |
+| `update_without_rollback` | code | any added line in a file whose path names update, upgrade, version, install, systemd or `bin/`; elsewhere `systemctl`, `launchctl`, `symlink(`, `".env"`, `node_modules`, `versions/`, `rollback`, `daemon-reload` | the update or install flow changed without a way back |
+| `event_without_dedup` | code | `webhook`, `replay`, `redeliver`, `retry`, `update_id`, `message_id`, `event_id`, `delivery_id`, `onMessage`/`onUpdate`/`onEvent` | a redelivered or retried event acts twice; no idempotency key |
+| `state_overwrite_instead_of_append` | code | `writeFile(`, `truncate`, `overwrite`, `fs.write(`, an open in `"w"` mode | persistent state is overwritten instead of appended or merged |
+| `prompt_depends_on_environment` | prompt, code | in prompt files: a path, a file extension, `bun`/`node`/`npx`/`bash`/`python`/`uv`, `skill`, a model or vendor name; in code: `build*Prompt(`, or a `prompt`, `instructions` or `system` assigned a template literal | a prompt points the model at a path, script, skill or model the install may not have |
+| `per_vendor_branch` | code, except files named `provider*`, `vendor*`, `model*` | `provider ===`, `vendor ===`, `case "<vendor>"`, `=== "<vendor>"` for common vendor names | a branch for one provider patches behaviour that every provider needs |
+| `user_text_quality` | code | `send*(`, `reply*(`, `respond*(`, `notify*(`, `post*(`, `sendMessage`, `reply_markup`, `inline_keyboard` | text sent to the user shows a trace, identifier, path or command, or skips localisation |
+
+Test files and test support (`*.render-harness.*`, `*-harness.*`, `*.stories.*`, `fixtures/`,
+`__mocks__/`) never get pack questions, project questions or `change_untested`.
+
+## Project questions
+
+Rules of one project go into its own `.quality.toml` as `[[review.jev_questions]]` tables. Each one
+is asked on changed hunks of files matching `files` (tests excluded) that add a line matching
+`trigger`, in the same request as the built-in questions of that hunk; the state is `file` and
+`source_hunk`.
+
+| key | required | meaning |
+|---|---|---|
+| `id` | yes | snake_case, unique, not a built-in id; the note and the log use it |
+| `files` | yes | globs of the files to ask about |
+| `trigger` | no | a regular expression one added line must match (default: any non-blank line) |
+| `instructions` | yes | the question, in English, one atomic property; read the hunk as `source_hunk` |
+| `criteria` | yes | `{ true = "...", false = "..." }` |
+| `note` | yes | the meaning printed after the location |
+| `threshold` | no | 0.7 by default |
+| `below` | no | `true` = a note when p is under the threshold (the good answer is yes) |
+
+```toml
+[[review.jev_questions]]
+id = "hint_as_visible_text"
+files = ["src/components/**/*.tsx"]
+trigger = "<(?:HelpText|FormDescription|FieldDescription)\\b"
+instructions = "Does `source_hunk` add an explanation of a field as permanent visible text next to it, instead of behind an information icon with a tooltip?"
+criteria = { true = "An added description explains a control and is always visible.", false = "The explanation sits behind an information icon, or the text warns about an irreversible action or a format limit." }
+note = "a field explanation is visible text, not behind an info icon"
+```
+
+A malformed entry (a missing key, a bad regex, a reused id) is one line,
+`jev: not available (review.jev_questions[<n>]: <what is wrong>)`, and nothing is asked.
 
 ## Requests and output
 
 All applicable questions of one hunk go in one request: a changed `.tsx` hunk asks `change_untested`
-and its UX questions together. Test hunks come first, then source hunks with UX questions, then the
-other source hunks; together there are at most `jev_max_states` (12) requests, and
+and its pack and project questions together. Test hunks come first, then source hunks with pack or
+project questions, then the other source hunks; together there are at most `jev_max_states` (12) requests, and
 `spec_incomplete` is always one request more. 5 s for the whole change. Output:
 
 - `note: jev <question> p=<p> >=|< <threshold>  <file>:+<line>  <meaning>` - a note (for the spec,
@@ -123,7 +172,8 @@ Examples:
 ```text
 note: jev change_untested p=0.10 < 0.5  src/sum.ts:+1  the changed behavior has no test in this diff
 note: jev spec_incomplete p=0.86 >= 0.7  docs/spec.md  the spec is not fully implemented
-note: jev hardcoded_color p=0.91 >= 0.7  apps/admin/src/Screen.tsx:+14  цвет задан литералом, а не токеном кита
+note: jev hardcoded_color p=0.91 >= 0.7  src/components/Card.tsx:+14  a color is a literal, not a design token
+note: jev silent_failure p=0.78 >= 0.7  agent/reply.ts:+31  an error on a user-facing path is swallowed; neither the user nor the log learns the cause
 ```
 
 **The notes are advisory.** Every answer is written to `<main checkout>/<out_dir>/jev-log.jsonl`

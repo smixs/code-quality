@@ -14,7 +14,7 @@ A quality gate for coding agents: git hooks and Stop hooks that block test tampe
 <p>
   <a href="https://skills.sh/smixs/code-quality"><img src="https://skills.sh/b/smixs/code-quality?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
-  <a href="scripts/"><img src="https://img.shields.io/badge/tests-242_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="242 tests"></a>
+  <a href="scripts/"><img src="https://img.shields.io/badge/tests-260_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="260 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
   <a href="hooks/hooks.json"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
   <a href="adapters/pi.ts"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
@@ -120,8 +120,8 @@ bun scripts/quality.ts --repo <repo> --update-baseline
 Five calibrated yes/no questions about added test hunks (a textual test, an untested error path, a
 weakened assertion, a mock that hides the change, a tautological property). It also asks whether each
 changed source hunk has a test in the same diff, whether the change implements the task spec
-(`[review] spec` or `QG_SPEC`) and, opt-in, UX questions on interface hunks. Notes only: Jev never
-changes the exit code. Two ways to connect, whichever key you have:
+(`[review] spec` or `QG_SPEC`) and, opt-in, UX and AI-agent question packs plus your own project
+questions. Notes only: Jev never changes the exit code. Two ways to connect, whichever key you have:
 
 ```toml
 [review]                      # TypeSafe directly, key from console.typesafe.ai/keys
@@ -141,7 +141,7 @@ Details, the model pins and the curl for each: [Jev reference](skills/code-quali
 - [Every rule, what blocks and what only notes](skills/code-quality/references/checks.md)
 - [Languages and adapters](skills/code-quality/references/languages.md)
 - [Configure `.quality.toml` and hooks](skills/code-quality/references/config.md)
-- [Jev: an optional classifier for test, source and UX hunks](skills/code-quality/references/jev.md)
+- [Jev: an optional classifier for test and source hunks](skills/code-quality/references/jev.md)
 - [SKILL.md](skills/code-quality/SKILL.md), the full reference the agent reads
 
 ## Credits
