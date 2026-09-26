@@ -297,7 +297,9 @@ function assertionWeakened(o: Opts, ch: Changes): Finding[] {
     const adapter = adapterForFile(o.langs, file)!;
     return sum + countPattern(d.added, adapter, "assert") - countPattern(d.removed, adapter, "assert");
   }, 0) >= 0;
-  return testChanges.flatMap(([file, d]) => {
+  // A deleted test file is one tamper/test-deleted finding (accepted by qg:test-removed); its
+  // removed assertions are not a second, unbypassable "fewer assertions" finding at line 0.
+  return testChanges.filter(([, d]) => !d.deleted).flatMap(([file, d]) => {
     const harnesses = sourceHarnesses(d.removed);
     return d.hunks.flatMap((h) => assertionFinding(o, file, h, assertionsMoved && sourceHarnessRemoval(o, file, h, harnesses)));
   });

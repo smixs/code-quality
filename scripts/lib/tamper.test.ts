@@ -171,6 +171,22 @@ describe("tamper/test-deleted", () => {
     expect(rules(repo)).toContain("tamper/test-deleted");
   });
 
+  test("a rewritten test file that git no longer pairs as a rename is only test-deleted, not assertion-weakened", () => {
+    const repo = tsRepo({
+      "src/value.ts": "export const value = 1;\n",
+      "src/value.test.ts": 'test("a", () => {\n  expect(value).toBe(1);\n  expect(value).not.toBe(2);\n});\n',
+    });
+    rmSync(join(repo, "src/value.test.ts"));
+    write(repo, "src/value.spec.test.ts", 'describe("value policy", () => {\n  test("holds", () => {\n    expect(String(value)).toBe("1");\n  });\n});\n');
+    write(repo, ".scratch/quality/allow.md", `${["qg:test", "-removed moved to value.spec.test.ts"].join("")}\n`);
+    git(repo, "add", "-A");
+    const o = buildOpts(readArgs(["hook", "pre-commit", "--repo", repo, "--staged", "--no-deps"]));
+    const result = tamperCheck(o, changes(o));
+    const found = result.findings.map((f) => f.rule);
+    expect(found).not.toContain("tamper/assertion-weakened");
+    expect(found).not.toContain("tamper/test-deleted");
+  });
+
   test("accepts the staged removal reason from allow.md in the pre-commit hook entry", () => {
     const repo = tsRepo({ "src/value.ts": "export const value = 1;\n", "src/value.test.ts": 'test("value", () => {});\n' });
     write(repo, "src/value.ts", "export const value = 2;\n");
