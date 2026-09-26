@@ -211,8 +211,9 @@ function removalBypassNotes(bypass: AcceptedBypass, removed: Finding[]) {
   return notes;
 }
 
+// pre-commit (entry "hook") sees no commit message yet, so the staged reason lives in allow.md there too.
 function allowFilePermitted(o: Opts) {
-  return o.entry === "agent-stop" || (o.entry === "check" && o.scope.kind === "staged");
+  return o.entry === "agent-stop" || ((o.entry === "check" || o.entry === "hook") && o.scope.kind === "staged");
 }
 
 function allowFile(o: Opts) {

@@ -171,6 +171,18 @@ describe("tamper/test-deleted", () => {
     expect(rules(repo)).toContain("tamper/test-deleted");
   });
 
+  test("accepts the staged removal reason from allow.md in the pre-commit hook entry", () => {
+    const repo = tsRepo({ "src/value.ts": "export const value = 1;\n", "src/value.test.ts": 'test("value", () => {});\n' });
+    write(repo, "src/value.ts", "export const value = 2;\n");
+    rmSync(join(repo, "src/value.test.ts"));
+    write(repo, ".scratch/quality/allow.md", `${["qg:test", "-removed replaced by the policy suite"].join("")}\n`);
+    git(repo, "add", "-A");
+    const o = buildOpts(readArgs(["hook", "pre-commit", "--repo", repo, "--staged", "--no-deps"]));
+    const result = tamperCheck(o, changes(o));
+    expect(result.findings.map((f) => f.rule)).not.toContain("tamper/test-deleted");
+    expect(result.notices).toContain("note: bypass tamper/test-deleted allow.md replaced by the policy suite");
+  });
+
   test("accepts an explicit staged removal reason", () => {
     const repo = tsRepo({ "src/value.ts": "export const value = 1;\n", "src/value.test.ts": 'test("value", () => {});\n' });
     write(repo, "src/value.ts", "export const value = 2;\n");
