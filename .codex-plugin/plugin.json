@@ -1,6 +1,6 @@
 {
   "name": "code-quality",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Deterministic quality gate for coding agents and git hooks",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"

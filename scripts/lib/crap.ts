@@ -8,7 +8,7 @@ import type { Opts } from "./config.ts";
 import { type Changes, WHOLE } from "./diff.ts";
 import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot } from "./lang.ts";
 import { npmSpec, packageSpec, pinnedVersion, toolsDir } from "./tools.ts";
-import { git, gitPaths, lines, refuse, run } from "./util.ts";
+import { git, gitPaths, lines, refuse, run, withoutRepoVars } from "./util.ts";
 
 export type Range = { start: number; end: number; col: number; nested: [number, number][] };
 export type Fn = Range & { file: string; name: string; key: string; cc: number; cov: number | null; crap: number | null };
@@ -54,7 +54,7 @@ function runFresh(o: Opts): Tests {
   rmSync(lcovPath(o), { force: true });
   const commit = git(o.repo, "rev-parse", "HEAD").trim();
   const fingerprint = sourceFingerprint(o, commit);
-  const env = { ...process.env, QG_LCOV: lcovPath(o), QG_DIR: o.out };
+  const env = withoutRepoVars({ ...process.env, QG_LCOV: lcovPath(o), QG_DIR: o.out });
   const r = spawnSync("sh", ["-c", `${configuredTestCmd(o)} > "$QG_DIR/tests.log" 2>&1`], { cwd: o.repo, env, stdio: "inherit" });
   if (!existsSync(lcovPath(o))) throw new Error(`no coverage at ${lcovPath(o)}; see ${o.out}/tests.log`);
   const meta = { commit, fingerprint, code: r.status ?? -1, failed: countFailed(readFileSync(join(o.out, "tests.log"), "utf8")), written: new Date().toISOString() };

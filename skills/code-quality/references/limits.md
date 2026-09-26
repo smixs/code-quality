@@ -40,6 +40,9 @@
   by name, M by import`; importers are searched one level deep and cut off by the shared
   `hooks.pre_push_max_tests` limit. The first push of a new branch without `project.base` (no
   `origin/main`) takes the diff from the parent, the root commit from an empty tree.
+- The tests and tools a hook starts run without git's repository variables (`GIT_DIR`,
+  `GIT_INDEX_FILE`, `GIT_WORK_TREE` and the rest of `git rev-parse --local-env-vars`): a test's
+  `git init` in a temp dir stays there. Only the gate's own git in the hooked work tree keeps them.
 - husky in `prepare` (`npm install`) rewrites `core.hooksPath` to `.husky/_` on its own and the skill's
   hooks switch off: run `install-hooks` again after installing dependencies. `git lfs install` in a repo
   with our `core.hooksPath` writes its hooks into the stable code-quality home (or refuses when a file is already

@@ -6,6 +6,8 @@ here=$(dirname "$0")
 refs=$(mktemp) || exit 1
 trap 'rm -f "$refs"' EXIT
 cat > "$refs"
-root=$(cat "$here/../root") || exit 2
+# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone.
+root=$(cat "$here/../hooks-root" 2>/dev/null)
+[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root") || exit 2
 bun "$root/scripts/quality.ts" hook pre-push --repo "$(git rev-parse --show-toplevel)" < "$refs" || exit $?
 "$here/_chain" pre-push "$@" < "$refs"

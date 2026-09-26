@@ -1,6 +1,6 @@
 // git hooks (pre-commit, commit-msg, pre-push), hook install/uninstall and the agent Stop contract.
 // Every entry point runs the same analysis; vendors only differ in how they call this file.
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
 import { type Args, buildOpts, CONFIG_FILE, DEFAULTS, type Opts, readArgs, repoConfigFile } from "./config.ts";
@@ -18,13 +18,51 @@ import { bypassNote, check, type Check, emptyTree, findingLine, git, gitPaths, l
 
 export const SOURCE_HOOKS_DIR = resolve(import.meta.dir, "../../git-hooks");
 export const LEGACY_HOOKS_DIR = resolve(import.meta.dir, "../../hooks");
+const PLUGIN_ROOT = resolve(import.meta.dir, "../..");
 export const pluginHome = () => resolve(process.env.CODE_QUALITY_HOME || join(homedir(), ".local/share/code-quality"));
 export const hooksDir = () => join(pluginHome(), "git-hooks");
+
+// The shims in git-hooks/ run the copy named in hooks-root. Every agent runs its own copy (the Claude
+// Code and Codex caches, pi, omp, Grok) and a session keeps the one it started with, so a copy takes
+// the hooks only when it is not older than the copy named there, or that copy is gone; install-hooks
+// takes them outright. Shims up to 1.2.0 read `root`, the last invoked copy: on 26.09 a pi session
+// still on 1.0.0 rewrote it seconds before a push, and the push ran 1.0.0. `root` is kept for them.
 export function updatePluginRoot() {
   const home = pluginHome();
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "root"), resolve(import.meta.dir, "../..") + "\n");
+  writeFileSync(join(home, "root"), PLUGIN_ROOT + "\n");
+  if (takesHooks(home)) pointHooks(home);
 }
+
+function takesHooks(home: string) {
+  const theirs = copyVersion(readText(join(home, "hooks-root")).trim());
+  return !theirs || Bun.semver.order(copyVersion(PLUGIN_ROOT) || "0.0.0", theirs) >= 0;
+}
+
+// "" when the copy is gone or has no version.
+function copyVersion(root: string) {
+  if (!root) return "";
+  const version = /"version"\s*:\s*"([^"]+)"/.exec(readText(join(root, "package.json")))?.[1] ?? "";
+  return /^\d+\.\d+\.\d+/.test(version) ? version : "";
+}
+
+// Points the shims at this copy and brings installed shims to its version. Each file is replaced by a
+// rename, so a hook that is running keeps reading the old one.
+function pointHooks(home: string) {
+  writeChanged(join(home, "hooks-root"), PLUGIN_ROOT + "\n", 0o644);
+  const target = join(home, "git-hooks");
+  if (!existsSync(target)) return;
+  for (const name of readdirSync(SOURCE_HOOKS_DIR)) writeChanged(join(target, name), readFileSync(join(SOURCE_HOOKS_DIR, name), "utf8"), 0o755);
+}
+
+function writeChanged(path: string, text: string, mode: number) {
+  if (readText(path) === text) return;
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text, { mode });
+  renameSync(tmp, path);
+}
+
+const readText = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
 const ZERO = /^0+$/;
 
 // ---- check: deterministic gate on the current change (seconds)
@@ -190,6 +228,8 @@ function checkOutput(item: Check) {
 
 function runTouchedTests(o: Opts, tests: string[], touchedLine: string) {
   const cmd = prePushCmd(o).replace("{files}", tests.map(shq).join(" "));
+  // A fresh worktree has no report directory yet, and the shell cannot open the log in a missing one.
+  mkdirSync(o.out, { recursive: true });
   const log = join(o.out, "pre-push.log");
   const t0 = Date.now();
   const r = run("sh", ["-c", `${cmd} > ${shq(log)} 2>&1`], o.repo, { timeout: o.toml.hooks.pre_push_timeout * 1000 });
@@ -271,8 +311,8 @@ export function installHooks(path: string | undefined) {
   const cur = localConfig(repo, "core.hooksPath");
   const target = hooksDir();
   if (cur && cur !== target && cur !== LEGACY_HOOKS_DIR) git(repo, "config", "--local", PREV_KEY, cur);
-  mkdirSync(pluginHome(), { recursive: true });
-  cpSync(SOURCE_HOOKS_DIR, target, { recursive: true, force: true });
+  mkdirSync(target, { recursive: true });
+  pointHooks(pluginHome());
   git(repo, "config", "--local", "core.hooksPath", target);
   console.log([`hooks installed: ${repo} core.hooksPath=${target}`, chainNote(repo), ...installNotes(repo)].join("\n"));
 }

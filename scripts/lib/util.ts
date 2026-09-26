@@ -1,14 +1,51 @@
 // Shared process and git helpers. No policy here.
 import { spawnSync } from "node:child_process";
-import { dirname } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 export type Finding = { rule: string; file: string; line: number; msg: string };
 export type Check = { name: string; findings: Finding[]; error: string; note: string; notices: string[] };
 export type BypassSource = "commit-msg" | "allow.md" | "inline";
 
 export function run(cmd: string, args: string[], cwd: string, opts: { timeout?: number; input?: string; env?: NodeJS.ProcessEnv } = {}) {
-  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 30, ...opts });
+  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 30, ...opts, env: childEnv(cmd, cwd, opts.env) });
   return { code: r.status ?? -1, out: r.stdout ?? "", err: errText(r) };
+}
+
+// git exports these to a hook so that git in the hook finds the hooked repository: a worktree push
+// gets GIT_DIR=<repo>/.git/worktrees/<name>, `git commit -a` GIT_INDEX_FILE=<repo>/.git/index.lock.
+// A test that runs `git init` or `git add` in a temp dir would act on that repository instead.
+// `git rev-parse --local-env-vars` less the -c settings, which git itself passes to another
+// repository, plus GIT_NAMESPACE.
+const GIT_REPO_VARS = [
+  "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+  "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_SHALLOW_FILE",
+];
+
+// git starts a hook in the root of the hooked work tree, and the hook starts this process there.
+const hookTree = realPath(process.cwd());
+
+// Bun gives a child the environment this process started with, whatever process.env says later, so
+// every spawn gets one explicitly. git in the hook's work tree keeps git's variables (the index being
+// committed is GIT_INDEX_FILE); tests, tools and git anywhere else run without them.
+function childEnv(cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (cmd === "git" && realPath(cwd) === hookTree) return env;
+  return withoutRepoVars(env);
+}
+
+export function withoutRepoVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const key of GIT_REPO_VARS) delete out[key];
+  return out;
+}
+
+function realPath(path: string) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 const errText = (r: { error?: Error; stderr?: string | null }) => (r.error ? String(r.error) : (r.stderr ?? ""));

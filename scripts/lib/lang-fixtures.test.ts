@@ -10,6 +10,9 @@ const SCRIPT = join(import.meta.dir, "../quality.ts");
 const FIXTURES = join(import.meta.dir, "../fixtures/lang");
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+// Every run of quality.ts moves the plugin pointers in CODE_QUALITY_HOME; never the real ones.
+const home = mkdtempSync(join(tmpdir(), "qg-lang-home-"));
+dirs.push(home);
 
 function fixtureRepo(language: string) {
   const repo = mkdtempSync(join(tmpdir(), `qg-${language}-`));
@@ -45,7 +48,7 @@ describe("language fixtures", () => {
     spawnSync("git", ["add", "-A"], { cwd: repo });
     const result = spawnSync(process.execPath, [SCRIPT, "check", "--repo", repo, "--all", "--src", ".", "--no-deps"], {
       encoding: "utf8",
-      env: { ...process.env, PATH: "/usr/bin:/bin" },
+      env: { ...process.env, PATH: "/usr/bin:/bin", CODE_QUALITY_HOME: home },
     });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("not run: crap/cc");

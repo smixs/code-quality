@@ -40,7 +40,7 @@ describe("[project] out_dir", () => {
     const o = buildOpts(readArgs(["check", "--repo", repo, "--no-deps"]));
     expect([o.outDir, o.out, o.baseline.endsWith(".quality-out/baseline.json")]).toEqual([".quality-out", join(repo, ".quality-out"), true]);
     writeFileSync(join(repo, "README.md"), "# a\n\nb\n");
-    const run = spawnSync(process.execPath, [join(SKILL, "scripts/quality.ts"), "check", "--repo", repo, "--no-deps"], { encoding: "utf8" });
+    const run = spawnSync(process.execPath, [join(SKILL, "scripts/quality.ts"), "check", "--repo", repo, "--no-deps"], { encoding: "utf8", env: testEnv });
     expect([run.status, existsSync(join(repo, ".quality-out/check.md")), existsSync(join(repo, ".scratch/quality"))]).toEqual([0, true, false]);
   }, 120_000);
 
@@ -84,7 +84,7 @@ describe("project.base", () => {
     expect([configured.base, configured.baseAuto]).toEqual(["origin/trunk", false]);
     writeFileSync(join(repo, ".quality.toml"), "[project]\n");
     commit(repo, "docs: base");
-    const run = spawnSync(process.execPath, [join(SKILL, "scripts/quality.ts"), "check", "--repo", repo, "--no-deps"], { encoding: "utf8" });
+    const run = spawnSync(process.execPath, [join(SKILL, "scripts/quality.ts"), "check", "--repo", repo, "--no-deps"], { encoding: "utf8", env: testEnv });
     expect(readFileSync(join(repo, ".scratch/quality/check.md"), "utf8")).toContain("base origin/trunk (detected)");
     expect(run.status).toBe(0);
   }, 120_000);
@@ -110,10 +110,38 @@ describe("install folder", () => {
     mkdirSync(next, { recursive: true });
     for (const dir of ["scripts", "git-hooks", "rules", "adapters", "skills"]) cpSync(join(SKILL, dir), join(next, dir), { recursive: true });
     spawnSync(process.execPath, [join(next, "scripts/quality.ts"), "check", "--if-configured", "--repo", repo], { encoding: "utf8", env: testEnv });
-    expect(readFileSync(join(testHome, "root"), "utf8").trim()).toBe(realpathSync(next));
+    expect(["root", "hooks-root"].map((name) => readFileSync(join(testHome, name), "utf8").trim())).toEqual([realpathSync(next), realpathSync(next)]);
     writeFileSync(join(repo, "README.md"), "# a\n\nb\n\nc\n");
     expect(commit(repo, "docs: third line").status).toBe(0);
   }, 180_000);
+
+  test("an older copy cannot take the hooks back, a newer one takes them with its shims", () => {
+    const home = join(tmp(), "home");
+    const env = { ...testEnv, CODE_QUALITY_HOME: home };
+    const copy = (name: string, version: string) => {
+      const dir = join(tmp(), name);
+      for (const sub of ["scripts", "git-hooks", "rules", "adapters", "skills"]) cpSync(join(SKILL, sub), join(dir, sub), { recursive: true });
+      writeFileSync(join(dir, "package.json"), `{ "name": "code-quality", "version": "${version}" }\n`);
+      return realpathSync(dir);
+    };
+    const quality = (dir: string, ...args: string[]) => spawnSync(process.execPath, [join(dir, "scripts/quality.ts"), ...args], { input: '{"tool_input":{"command":"true"}}', encoding: "utf8", env });
+    const pointer = (name: string) => readFileSync(join(home, name), "utf8").trim();
+    const repo = docsRepo('[project]\nbase = "HEAD"\n');
+    const [current, old, next] = [copy("current", "1.2.1"), copy("old", "1.0.0"), copy("next", "1.3.0")];
+    quality(current, "install-hooks", repo);
+    quality(old, "guard-bash");
+    expect([pointer("root"), pointer("hooks-root")]).toEqual([old, current]);
+    writeFileSync(join(old, "scripts/quality.ts"), "process.exit(3);\n");
+    const message = join(tmp(), "COMMIT_EDITMSG");
+    writeFileSync(message, "docs: a line\n");
+    expect(spawnSync("sh", [join(home, "git-hooks/commit-msg"), message], { cwd: repo, encoding: "utf8", env }).status).toBe(0);
+    writeFileSync(join(home, "git-hooks/pre-push"), "#!/bin/sh\nexit 0\n");
+    quality(next, "guard-bash");
+    expect([pointer("hooks-root"), readFileSync(join(home, "git-hooks/pre-push"), "utf8")]).toEqual([next, readFileSync(join(SKILL, "git-hooks/pre-push"), "utf8")]);
+    rmSync(next, { recursive: true });
+    quality(current, "guard-bash");
+    expect(pointer("hooks-root")).toBe(current);
+  }, 60_000);
 });
 
 describe("test commands", () => {

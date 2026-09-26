@@ -165,13 +165,13 @@ describe("agent-stop", () => {
     writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
     writeFileSync(join(repo, "src/k.ts"), "export const k = 1;\n");
     sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
-    const stop = () => spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, session_id: "s1" }), encoding: "utf8" });
+    const stop = () => spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, session_id: "s1" }), encoding: "utf8", env: testEnv });
     expect([stop().stdout.trim(), existsSync(join(repo, ".scratch/quality/check.md"))]).toEqual(["{}", false]);
     const ifs = Array.from({ length: 11 }, (_, i) => `  if (x === ${i}) return ${i};`).join("\n");
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs}\n  return -1;\n}\n`);
     sh(repo, "git add src/a.ts");
     expect(JSON.parse(stop().stdout).decision).toBe("block");
-    const camel = spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, sessionId: "camel" }), encoding: "utf8" });
+    const camel = spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, sessionId: "camel" }), encoding: "utf8", env: testEnv });
     expect(JSON.parse(camel.stdout).decision).toBe("block");
   }, 120_000);
   test("a Jev note that changes between two Stops does not block a second time; a new red verdict does", async () => {
@@ -199,7 +199,7 @@ describe("agent-stop", () => {
     expect(redAnswer(stopState, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toHaveProperty("decision", "block");
   }, 120_000);
   test("stdin that is not JSON is an error with JSON output (exit 1), not an allow", () => {
-    const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: "garbage", encoding: "utf8" });
+    const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: "garbage", encoding: "utf8", env: testEnv });
     expect([r.status, JSON.parse(r.stdout).systemMessage]).toEqual([1, "code-quality Stop hook received invalid JSON input"]);
   });
   test("missing session id is an explicit JSON error", () => {
@@ -421,7 +421,7 @@ audit = false
     sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
     writeFileSync(join(repo, "README.md"), "after\n");
     sh(repo, "git add README.md && git -c user.name=t -c user.email=t@t commit -qm docs");
-    const run = spawnSync(process.execPath, [SCRIPT, "--repo", repo, "--no-deps"], { encoding: "utf8" });
+    const run = spawnSync(process.execPath, [SCRIPT, "--repo", repo, "--no-deps"], { encoding: "utf8", env: testEnv });
     const report = readFileSync(join(repo, ".scratch/quality/report.md"), "utf8");
     expect([run.status, report.includes("scope all"), report.includes("functions 1,")]).toEqual([0, true, true]);
   }, 120_000);
@@ -445,7 +445,7 @@ audit = false
 `);
     sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
     writeFileSync(baseline, original);
-    const run = spawnSync(process.execPath, [SCRIPT, "--repo", repo, "--no-deps", "--update-baseline", "--baseline", baseline], { encoding: "utf8" });
+    const run = spawnSync(process.execPath, [SCRIPT, "--repo", repo, "--no-deps", "--update-baseline", "--baseline", baseline], { encoding: "utf8", env: testEnv });
     expect([run.status, run.stdout, readFileSync(baseline, "utf8")]).toEqual([
       1,
       expect.stringContaining("baseline not written: 0 functions found for non-empty project.src"),

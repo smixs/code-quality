@@ -2,6 +2,8 @@
 # code-quality commit-msg: blocks AI/tool attribution lines (and glossary Avoid words when configured).
 # Own verdict first; green = the repo's own commit-msg runs (hooks/_chain).
 here=$(dirname "$0")
-root=$(cat "$here/../root") || exit 2
+# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone.
+root=$(cat "$here/../hooks-root" 2>/dev/null)
+[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root") || exit 2
 bun "$root/scripts/quality.ts" hook commit-msg "$1" --repo "$(git rev-parse --show-toplevel)" || exit $?
 exec "$here/_chain" commit-msg "$@"

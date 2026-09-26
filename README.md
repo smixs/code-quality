@@ -14,7 +14,7 @@ A quality gate for coding agents: git hooks and Stop hooks that block test tampe
 <p>
   <a href="https://skills.sh/smixs/code-quality"><img src="https://skills.sh/b/smixs/code-quality?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
-  <a href="scripts/"><img src="https://img.shields.io/badge/tests-260_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="260 tests"></a>
+  <a href="scripts/"><img src="https://img.shields.io/badge/tests-264_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="264 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
   <a href="hooks/hooks.json"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
   <a href="adapters/pi.ts"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
@@ -113,7 +113,7 @@ bun scripts/quality.ts install-hooks <repo>
 bun scripts/quality.ts --repo <repo> --update-baseline
 ```
 
-`install-hooks` sets `core.hooksPath` to `~/.local/share/code-quality/git-hooks/`, or `$CODE_QUALITY_HOME/git-hooks/`. A root pointer follows the latest invoked plugin copy. Existing repository hooks are chained. See [configuration](skills/code-quality/references/config.md).
+`install-hooks` sets `core.hooksPath` to `~/.local/share/code-quality/git-hooks/`, or `$CODE_QUALITY_HOME/git-hooks/`. The hooks run the newest plugin copy invoked on this machine, so an agent session still on an older copy cannot take them back. Existing repository hooks are chained. See [configuration](skills/code-quality/references/config.md).
 
 ## Jev, optional
 

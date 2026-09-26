@@ -2,6 +2,8 @@
 # code-quality pre-commit: installed per repo by `quality.ts install-hooks <repo>` (core.hooksPath).
 # Own verdict first; green = the repo's own pre-commit runs (hooks/_chain).
 here=$(dirname "$0")
-root=$(cat "$here/../root") || exit 2
+# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone.
+root=$(cat "$here/../hooks-root" 2>/dev/null)
+[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root") || exit 2
 bun "$root/scripts/quality.ts" hook pre-commit --repo "$(git rev-parse --show-toplevel)" || exit $?
 exec "$here/_chain" pre-commit "$@"
