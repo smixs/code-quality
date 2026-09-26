@@ -48,8 +48,13 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   (12); switches `textual_test`, `error_path_tested`, `assertion_weakened`, `mock_hides_behavior`,
   `property_is_tautology` (all `true` by default); thresholds `textual_test_threshold` (0.85),
   `error_path_tested_threshold` (0.5), `assertion_weakened_threshold`, `mock_hides_behavior_threshold`,
-  `property_tautology_threshold` (the last three at 0.7). `llm` is not wired yet, `true` gives one
-  `note:` line.
+  `property_tautology_threshold` (the last three at 0.7). `change_untested` (`true`) with
+  `change_untested_threshold` (0.5, a note below it). `spec` - the task spec for `spec_incomplete`, a
+  path relative to the repo (`spec = "docs/specs/task.md"`); empty = the path in `$QG_SPEC`; neither
+  = one `jev: spec not set ([review] spec or QG_SPEC)` line and no spec question; `spec_incomplete`
+  (`true`) with `spec_incomplete_threshold` (0.7). The UX pack: `ux_globs` and `i18n_globs` (globs of
+  interface files and of text dictionaries, both empty = off), `ux_off` (question ids to skip),
+  `ux_threshold` (0.7). `llm` is not wired yet, `true` gives one `note:` line.
   Reviewers never block.
 
 The list of guarded keys and the rule for changing them together with sources is in

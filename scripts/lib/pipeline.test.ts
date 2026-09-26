@@ -479,10 +479,11 @@ audit = false
 
 // Jev is injected: no network. Staged change = code adds a throw, a new test reads a source file's text.
 describe("jev notes", () => {
+  // change_untested is off here: these tests hold the test-hunk questions alone (jev.test.ts has the rest).
   const jevRepo = () => {
     const repo = tmp();
     mkdirSync(join(repo, "src"));
-    writeFileSync(join(repo, ".quality.toml"), '[project]\nlanguage = "ts"\nsrc = ["src"]\nbase = "HEAD"\n[review]\njev = true\n');
+    writeFileSync(join(repo, ".quality.toml"), '[project]\nlanguage = "ts"\nsrc = ["src"]\nbase = "HEAD"\n[review]\njev = true\nchange_untested = false\n');
     writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
     writeFileSync(join(repo, "src/a.ts"), "export const a = (x: number) => x;\n");
     sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
@@ -526,7 +527,7 @@ describe("jev notes", () => {
     const repo = tmp();
     mkdirSync(join(repo, "src"));
     const toggles = newQuestions.map((x) => `${x.id} = ${x.id === q.id}`).join("\n");
-    writeFileSync(join(repo, ".quality.toml"), `[project]\nlanguage = "ts"\nsrc = ["src"]\nbase = "HEAD"\n[review]\njev = true\ntextual_test = false\nerror_path_tested = false\n${toggles}\n`);
+    writeFileSync(join(repo, ".quality.toml"), `[project]\nlanguage = "ts"\nsrc = ["src"]\nbase = "HEAD"\n[review]\njev = true\nchange_untested = false\ntextual_test = false\nerror_path_tested = false\n${toggles}\n`);
     writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
     writeFileSync(join(repo, "src/a.ts"), "export const a = (x: number) => x;\n");
     writeFileSync(join(repo, "src/a.test.ts"), q.before);

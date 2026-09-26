@@ -56,6 +56,18 @@ export const DEFAULTS = {
     mock_hides_behavior_threshold: 0.7,
     property_is_tautology: true,
     property_tautology_threshold: 0.7,
+    // Changed source hunks: is the change tested in this diff (a note when p < threshold).
+    change_untested: true,
+    change_untested_threshold: 0.5,
+    // The task spec: a path in the repo; empty = $QG_SPEC; neither = one "spec not set" line.
+    spec: "",
+    spec_incomplete: true,
+    spec_incomplete_threshold: 0.7,
+    // UX pack (jev-ux.ts): asked only on files matching these globs; both empty = off.
+    ux_globs: [] as string[],
+    i18n_globs: [] as string[],
+    ux_off: [] as string[],
+    ux_threshold: 0.7,
   },
 };
 

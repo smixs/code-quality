@@ -1,33 +1,29 @@
-// Jev review notes: five Noul questions on added test hunks, asked through a Jev provider (TypeSafe
-// direct, OpenRouter, or a custom endpoint with the same contract). Notes only: nothing here can
-// change the verdict. Any failure is one "jev: not available (<reason>)" line,
-// never a silent pass. Every verdict goes to jev-log.jsonl.
+// Jev review notes: Noul questions asked through a Jev provider (TypeSafe direct, OpenRouter, or a
+// custom endpoint with the same contract): five on added test hunks (here), change_untested and the
+// UX pack on changed source hunks (jev-source.ts), spec_incomplete on the whole change (jev-spec.ts).
+// Notes only: nothing here can change the verdict. Any failure is one "jev: not available (<reason>)"
+// line, never a silent pass. Every verdict goes to jev-log.jsonl.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Opts } from "./config.ts";
-import { addedLines, type Changes, diffArgs, WHOLE } from "./diff.ts";
+import { addedLines, type Changes } from "./diff.ts";
+import { bodyOf, clip, clippedList, type Hunk, hunksOf, type JevCtx, MAX_STATE_CHARS, type QBase, type Req, type Review } from "./jev-hunks.ts";
+import { sourceFiles, sourceRequests } from "./jev-source.ts";
+import { specRequests } from "./jev-spec.ts";
 import { adapterForFile, isTestFile, matchesTestPattern } from "./lang.ts";
 import { localStubShadows } from "./tamper.ts";
-import { git, mainCheckout, run } from "./util.ts";
+import { mainCheckout, run } from "./util.ts";
 
 const TIMEOUT_MS = 5000;
-// A conservative approximation of Jev's 32k-token state limit. This budget is shared by
-// all text fields in one state, so adding questions cannot multiply the state size.
-const MAX_STATE_CHARS = 40000;
 // Code that adds a throw, a catch or an error return: only then is "error path not tested" asked.
 const ERROR_ADD = /\bthrow\b|\bcatch\b|\breject\(|\braise\b|\bexcept\b|process\.exit\([1-9]|return\s[^;]*\b(err|error|Err|Error|ok:\s*false)\b/;
 
-type Noul = { type: "noul"; instructions: string; criteria: { true: string; false: string } };
 type Field = "added_test_code" | "diff_hunk" | "test_hunk" | "changed_source_files";
 type QContext = { errorsAdded: boolean; localStub: (h: Hunk) => boolean };
-type QDef = {
+type QDef = QBase & {
   id: QId;
-  label: string;
-  below: boolean;
   fields: Field[];
-  threshold: string;
   applies?: (h: Hunk, c: QContext) => boolean;
-  q: Noul;
 };
 type QId = "textual_test" | "error_path_tested" | "assertion_weakened" | "mock_hides_behavior" | "property_is_tautology";
 
@@ -121,11 +117,9 @@ export const QUESTIONS: QDef[] = [
   },
 ];
 
-export type Hunk = { file: string; at: string; text: string };
 type Reply = { status: number; text: string };
 export type Post = (target: Target, body: unknown, signal: AbortSignal) => Promise<Reply>;
 export type JevDeps = { env: NodeJS.ProcessEnv; post: Post };
-type Req = { hunk: Hunk; qs: QDef[]; body: unknown };
 
 // ---- provider: where the questions are asked, which key opens it, which model answers
 
@@ -141,7 +135,6 @@ export const PROVIDERS = {
   openrouter: { url: "https://openrouter.ai/api/alpha/decisions", keyEnv: "OPENROUTER_API_KEY", model: "typesafe/jev-1.13-20260917" },
 } as const;
 
-type Review = Record<string, string | number | boolean>;
 const str = (r: Review, key: string) => String(r[key] ?? "").trim();
 
 function autoProvider(env: NodeJS.ProcessEnv): "typesafe" | "openrouter" {
@@ -190,88 +183,26 @@ export const postWith = (fetchImpl: typeof fetch): Post => async (target, body, 
 
 export const defaultJev = (): JevDeps => ({ env: process.env, post: postWith(fetch) });
 
-// ---- hunks: added test hunks with 3 lines of context, as Jev expects them
-
-type St = { file: string; cur: Hunk | null };
-
-export function splitHunks(diff: string): Hunk[] {
-  const out: Hunk[] = [];
-  const st: St = { file: "", cur: null };
-  for (const l of diff.split("\n")) hunkLine(out, st, l);
-  return out.filter((h) => h.text.split("\n").some((l) => l.startsWith("+")));
-}
-
-function hunkLine(out: Hunk[], st: St, l: string) {
-  if (l.startsWith("diff --git ")) return void (st.cur = null);
-  if (l.startsWith("@@")) return void (st.cur = openHunk(out, st.file, l));
-  if (st.cur) return bodyLine(st.cur, l);
-  if (l.startsWith("+++ ")) st.file = fileOf(l);
-}
-
-const fileOf = (l: string) => (l.startsWith("+++ b/") ? l.slice(6) : "");
-
-function openHunk(out: Hunk[], file: string, header: string) {
-  if (!file) return null;
-  const h = { file, at: `+${/\+(\d+)/.exec(header)?.[1] ?? "?"}`, text: header };
-  out.push(h);
-  return h;
-}
-
-function bodyLine(h: Hunk, l: string) {
-  if (/^[ +\-\\]/.test(l)) h.text += `\n${l}`;
-}
-
-// Untracked and --all files have no diff: the whole file is one added hunk.
-function wholeHunk(ch: Changes, file: string): Hunk {
-  const body = [...ch.get(file)!.added.values()].map((t) => `+${t}`).join("\n");
-  return { file, at: "+1", text: `@@ new file @@\n${body}` };
-}
+// ---- test hunks: added test hunks with 3 lines of context, as Jev expects them
 
 export function testHunks(o: Opts, ch: Changes): Hunk[] {
-  const tests = [...ch.keys()].filter((f) => isTestFile(o.langs, f));
-  const whole = tests.filter((f) => ch.get(f)!.touched.has(WHOLE));
-  const tracked = tests.filter((f) => !whole.includes(f));
-  return [...trackedHunks(o, tracked), ...whole.map((f) => wholeHunk(ch, f))];
-}
-
-function trackedHunks(o: Opts, files: string[]) {
-  if (!files.length || o.scope.kind === "all") return [];
-  const args = diffArgs(o).map((a) => (a === "-U0" ? "-U3" : a));
-  return splitHunks(git(o.repo, ...args, "--", ...files));
+  return hunksOf(o, ch, [...ch.keys()].filter((f) => isTestFile(o.langs, f)));
 }
 
 export const codeAddsErrors = (o: Opts, ch: Changes) => addedLines(ch, (file) => Boolean(adapterForFile(o.langs, file)) && !isTestFile(o.langs, file)).some((x) => ERROR_ADD.test(x.text));
 
-// ---- requests: all applicable questions of one hunk in one request; state has only fields they read
+// ---- test requests: all applicable questions of one hunk in one request; state has only fields they read
 
 function enabledQs(r: Review, h: Hunk, context: QContext) {
   return QUESTIONS.filter((q) => r[q.id] === true && (!q.applies || q.applies(h, context)));
 }
 
-const CUT = "\n[... cut ...]";
-const clip = (s: string, limit: number) => (s.length <= limit ? s : limit <= CUT.length ? CUT.slice(0, limit) : `${s.slice(0, limit - CUT.length)}${CUT}`);
 const addedCode = (h: Hunk) => h.text.split("\n").filter((l) => l.startsWith("+")).map((l) => l.slice(1)).join("\n");
-
-function sourceFiles(o: Opts, ch: Changes) {
-  return [...ch.keys()].filter((file) => adapterForFile(o.langs, file) && !isTestFile(o.langs, file)).sort();
-}
-
-function clippedPaths(paths: string[]) {
-  const out: string[] = [];
-  let chars = 2;
-  for (const path of paths) {
-    const next = JSON.stringify(path).length + 1;
-    if (chars + next > MAX_STATE_CHARS / 4) break;
-    out.push(path);
-    chars += next;
-  }
-  return out;
-}
 
 function stateOf(h: Hunk, qs: QDef[], changedSourceFiles: string[]) {
   const fields = new Set(qs.flatMap((q) => q.fields));
   const state: Record<string, string | string[]> = { file: h.file };
-  if (fields.has("changed_source_files")) state.changed_source_files = clippedPaths(changedSourceFiles);
+  if (fields.has("changed_source_files")) state.changed_source_files = clippedList(changedSourceFiles, MAX_STATE_CHARS / 4);
   const texts = [...fields].filter((f) => f !== "changed_source_files");
   const overhead = JSON.stringify({ ...state, ...Object.fromEntries(texts.map((f) => [f, ""])) }).length;
   const perField = Math.max(0, Math.floor((MAX_STATE_CHARS - overhead) / Math.max(1, texts.length)));
@@ -281,13 +212,29 @@ function stateOf(h: Hunk, qs: QDef[], changedSourceFiles: string[]) {
   return state;
 }
 
-function requestOf(model: string, h: Hunk, qs: QDef[], changedSourceFiles: string[]): Req {
-  return { hunk: h, qs, body: { model, state: stateOf(h, qs, changedSourceFiles), questions: Object.fromEntries(qs.map((q) => [q.id, q.q])) } };
+function testRequests(ctx: JevCtx, hunks: Hunk[]): Req[] {
+  const { o, ch, r, model } = ctx;
+  const context = { errorsAdded: codeAddsErrors(o, ch), localStub: (h: Hunk) => hasMock(o, ch, h) };
+  const changedSourceFiles = sourceFiles(o, ch);
+  return hunks.flatMap((h) => {
+    const qs = enabledQs(r, h, context);
+    return qs.length ? [{ hunk: h, qs, body: bodyOf(model, qs, stateOf(h, qs, changedSourceFiles)) }] : [];
+  });
+}
+
+function hasMock(o: Opts, ch: Changes, h: Hunk) {
+  const adapter = adapterForFile(o.langs, h.file);
+  if (adapter && matchesTestPattern(adapter, "mock", h.text)) return true;
+  return localStubShadows(o, ch, h.file, addedForStub(h)).length > 0;
+}
+
+function addedForStub(h: Hunk) {
+  return h.text.split("\n").filter((line) => line.startsWith("+")).map((text, line) => ({ line, text: text.slice(1) }));
 }
 
 // ---- asking and reading the answers
 
-type Verdict = { q: QDef; hunk: Hunk; p: number; model: string };
+type Verdict = { q: QBase; hunk: Hunk; p: number; model: string; at: string; why: string; suffix: string };
 
 // The provider answers with the versioned model id: that is what the log records, not the request's.
 async function ask(d: JevDeps, target: Target, r: Req, signal: AbortSignal): Promise<Verdict[]> {
@@ -295,13 +242,22 @@ async function ask(d: JevDeps, target: Target, r: Req, signal: AbortSignal): Pro
   if (res.status !== 200) throw new Error(`${target.provider} ${res.status}`);
   const answer = JSON.parse(res.text);
   const model = typeof answer.model === "string" && answer.model ? answer.model : target.model;
-  return r.qs.map((q) => ({ q, hunk: r.hunk, p: noulOf(answer.answers, q.id), model }));
+  return r.qs.map((q) => ({ q, hunk: r.hunk, p: noulOf(answer.answers, q.id), model, at: r.at?.[q.id] ?? r.hunk.at, why: whyOf(answer.answers, q.id), suffix: r.suffix ?? "" }));
 }
 
-function noulOf(answers: Record<string, { noul?: unknown }> | undefined, id: string) {
+type Answers = Record<string, { noul?: unknown; reason?: unknown; explanation?: unknown }> | undefined;
+
+function noulOf(answers: Answers, id: string) {
   const p = answers?.[id]?.noul;
   if (typeof p !== "number") throw new Error(`no noul for ${id} in the answer`);
   return p;
+}
+
+// The documented Noul answer is a probability only; a text, when a provider adds one, goes into the note.
+function whyOf(answers: Answers, id: string) {
+  const a = answers?.[id];
+  const text = typeof a?.reason === "string" ? a.reason : typeof a?.explanation === "string" ? a.explanation : "";
+  return text.replace(/\s+/g, " ").trim();
 }
 
 const TIMEOUTS = new Set(["TimeoutError", "AbortError"]);
@@ -316,17 +272,23 @@ const noted = (v: Verdict, r: Review) => {
   return v.q.below ? v.p < t : v.p >= t;
 };
 
+const place = (v: Verdict) => (v.at ? `${v.hunk.file}:${v.at}` : v.hunk.file);
+
 function noteLine(v: Verdict, r: Review) {
   const side = v.q.below ? "<" : ">=";
-  return `note: jev ${v.q.id} p=${v.p.toFixed(2)} ${side} ${r[v.q.threshold]}  ${v.hunk.file}:${v.hunk.at}  ${v.q.label}`;
+  const tail = [v.why && `: ${v.why}`, v.suffix && ` (${v.suffix})`].filter(Boolean).join("");
+  return `note: jev ${v.q.id} p=${v.p.toFixed(2)} ${side} ${r[v.q.threshold]}  ${place(v)}  ${v.q.label}${tail}`;
 }
+
+// A cut state is said even when the answer is not a note: the probability covers only what was sent.
+const suffixLine = (v: Verdict) => `jev: ${v.q.id} p=${v.p.toFixed(2)}, ${v.suffix}`;
 
 function logVerdicts(o: Opts, vs: Verdict[], r: Review) {
   const dir = join(mainCheckout(o.repo), o.outDir);
   mkdirSync(dir, { recursive: true });
   const sha = run("git", ["rev-parse", "--short", "HEAD"], o.repo).out.trim();
   const ts = new Date().toISOString();
-  const rows = vs.map((v) => JSON.stringify({ ts, question: v.q.id, p: v.p, file: v.hunk.file, hunk: v.hunk.at, sha, scope: o.scope.kind, model: v.model, noted: noted(v, r) }));
+  const rows = vs.map((v) => JSON.stringify({ ts, question: v.q.id, p: v.p, file: v.hunk.file, hunk: v.at, sha, scope: o.scope.kind, model: v.model, noted: noted(v, r) }));
   if (rows.length) appendFileSync(join(dir, "jev-log.jsonl"), `${rows.join("\n")}\n`);
 }
 
@@ -347,38 +309,28 @@ async function askAll(ctx: AskCtx, reqs: Req[]) {
   const failed = settled.flatMap((s) => (s.status === "rejected" ? [reasonOf(s.reason)] : []));
   logVerdicts(o, vs, r);
   const notes = vs.filter((v) => noted(v, r)).map((v) => noteLine(v, r));
+  const cut = vs.filter((v) => v.suffix && !noted(v, r)).map(suffixLine);
   const model = vs[0]?.model ?? target.model;
-  return [...notes, ...failLine(failed, reqs.length), `jev: ${reqs.length - failed.length} of ${reqs.length} hunk(s) answered, ${notes.length} note(s), ${target.provider} ${model}`];
+  return [...notes, ...cut, ...failLine(failed, reqs.length), `jev: ${reqs.length - failed.length} of ${reqs.length} request(s) answered, ${notes.length} note(s), ${target.provider} ${model}`];
 }
 
+// Hunk requests (test hunks first, then source hunks) share jev_max_states; the spec request is one more.
 function requests(o: Opts, ch: Changes, r: Review, model: string) {
-  const hunks = testHunks(o, ch);
-  const context = { errorsAdded: codeAddsErrors(o, ch), localStub: (h: Hunk) => hasMock(o, ch, h) };
-  const changedSourceFiles = sourceFiles(o, ch);
-  const reqs = hunks.flatMap((h) => {
-    const qs = enabledQs(r, h, context);
-    return qs.length ? [requestOf(model, h, qs, changedSourceFiles)] : [];
-  });
-  return { reqs: reqs.slice(0, Number(r.jev_max_states)), total: reqs.length };
-}
-
-function hasMock(o: Opts, ch: Changes, h: Hunk) {
-  const adapter = adapterForFile(o.langs, h.file);
-  if (adapter && matchesTestPattern(adapter, "mock", h.text)) return true;
-  return localStubShadows(o, ch, h.file, addedForStub(h)).length > 0;
-}
-
-function addedForStub(h: Hunk) {
-  return h.text.split("\n").filter((line) => line.startsWith("+")).map((text, line) => ({ line, text: text.slice(1) }));
+  const tests = testHunks(o, ch);
+  const hunkReqs = [...testRequests({ o, ch, r, model }, tests), ...sourceRequests({ o, ch, r, model }, tests)];
+  const reqs = hunkReqs.slice(0, Number(r.jev_max_states));
+  return { reqs, total: hunkReqs.length };
 }
 
 async function jevLines(o: Opts, ch: Changes, d: JevDeps) {
   const r = o.toml.review as Review;
   const target = jevTarget(r, d.env);
   const { reqs, total } = requests(o, ch, r, target.model);
-  if (!reqs.length) return ["jev: nothing to ask (no added test hunks)"];
-  const capped = total > reqs.length ? [`jev: asked ${reqs.length} of ${total} test hunks (jev_max_states)`] : [];
-  return [...capped, ...(await askAll({ o, d, target, r }, reqs))];
+  const spec = specRequests({ o, ch, r, model: target.model }, d.env);
+  const all = [...reqs, ...spec.reqs];
+  if (!all.length) return [...spec.lines, "jev: nothing to ask (no test or source hunks)"];
+  const capped = total > reqs.length ? [`jev: asked ${reqs.length} of ${total} hunks (jev_max_states)`] : [];
+  return [...capped, ...spec.lines, ...(await askAll({ o, d, target, r }, all))];
 }
 
 // Boundary: whatever breaks inside (git, the log file, the answer) becomes one line, never a throw.
