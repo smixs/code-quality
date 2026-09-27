@@ -122,6 +122,9 @@ describe("check --since <rev> --tests", () => {
     ["no DA lines", `printf 'TN:\\nSF:src/calc.ts\\nend_of_record\\n' > "$QG_LCOV"`],
     ["a DA line with a junk tail", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,1\\nDA:2,1junk\\nDA:3,1\\nDA:4,1\\nend_of_record\\n' > "$QG_LCOV"`],
     ["a DA line with a non-numeric count", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,x\\nend_of_record\\n' > "$QG_LCOV"`],
+    ["a DA line after end_of_record", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,1\\nend_of_record\\nDA:2,1\\nDA:3,1\\nDA:4,1\\n' > "$QG_LCOV"`],
+    ["an SF inside an open record", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,1\\nSF:src/calc.ts\\nDA:2,1\\nDA:3,1\\nDA:4,1\\nend_of_record\\n' > "$QG_LCOV"`],
+    ["no final end_of_record", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,1\\nDA:2,1\\nDA:3,1\\nDA:4,1\\n' > "$QG_LCOV"`],
   ];
   for (const [name, cmd] of invalid) {
     test(`exit 0 with invalid coverage (${name}) is tests: ERROR invalid coverage, exit 1`, () => {

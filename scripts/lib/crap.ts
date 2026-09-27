@@ -147,8 +147,9 @@ export async function runTouchedCoverage(o: Opts, tests: string[], cmd: string) 
   return { run: r, tests: result, dir };
 }
 
-// Valid = readable, every DA line whole (DA:<line>,<hits>[,<checksum>]), and at least one SF record
-// with DA lines. A junk tail would reach parseLcov as NaN hits.
+// Valid = readable, records well formed (SF opens, end_of_record closes, no SF inside an open record,
+// none left open), every DA whole (DA:<line>,<hits>[,<checksum>]) and inside a record, and at least
+// one DA. A junk tail would reach parseLcov as NaN hits.
 const DA_LINE = /^DA:\d+,\d+(?:,[^,\s]+)?$/;
 
 function validLcov(path: string) {
@@ -158,15 +159,22 @@ function validLcov(path: string) {
   } catch {
     return false;
   }
-  let file = false;
+  let open = false;
   let hits = false;
   for (const line of text.split("\n").map((l) => l.trimEnd())) {
-    if (line.startsWith("DA:") && !DA_LINE.test(line)) return false;
-    if (line.startsWith("SF:")) file = true;
-    else if (line.startsWith("end_of_record")) file = false;
-    else if (file && line.startsWith("DA:")) hits = true;
+    const step = lcovStep(line, open);
+    if (!step) return false;
+    open = step.open;
+    hits ||= step.hit;
   }
-  return hits;
+  return hits && !open;
+}
+
+function lcovStep(line: string, open: boolean): { open: boolean; hit: boolean } | null {
+  if (line.startsWith("SF:")) return open ? null : { open: true, hit: false };
+  if (line.startsWith("end_of_record")) return { open: false, hit: false };
+  if (!line.startsWith("DA:")) return { open, hit: false };
+  return open && DA_LINE.test(line) ? { open, hit: true } : null;
 }
 
 function readMeta(o: Opts): TestMeta | null {
@@ -202,12 +210,14 @@ function changedSince(o: Opts, commit: string) {
   return all.length ? all : ["(untracked files changed)"];
 }
 
-// lcov: DA hits of duplicate SF records are added together.
+// lcov: DA hits of duplicate SF records are added together. A DA counts only between an SF and its
+// end_of_record; one outside a record goes nowhere.
 export function parseLcov(path: string, repo: string) {
   const da = new Map<string, Map<number, number>>();
   let cur = new Map<number, number>();
   for (const line of readFileSync(path, "utf8").split("\n")) {
     if (line.startsWith("SF:")) cur = lcovFile(da, relative(repo, resolve(repo, line.slice(3).trim())));
+    else if (line.startsWith("end_of_record")) cur = new Map();
     else if (line.startsWith("DA:")) addHits(cur, line.slice(3));
   }
   return da;
