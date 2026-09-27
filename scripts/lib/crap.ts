@@ -150,8 +150,8 @@ export async function runTouchedCoverage(o: Opts, tests: string[], cmd: string) 
   return { run: r, tests: result, dir };
 }
 
-// Valid = readable, records well formed (SF opens, end_of_record closes, no SF inside an open record,
-// none left open), every DA whole (DA:<line>,<hits>[,<checksum>]) and inside a record, and at least
+// Valid = readable, records well formed (SF opens, the exact line end_of_record closes an open record,
+// no SF inside an open record, none left open), every DA whole (DA:<line>,<hits>[,<checksum>]) and inside a record, and at least
 // one DA. A junk tail would reach parseLcov as NaN hits.
 const DA_LINE = /^DA:\d+,\d+(?:,[^,\s]+)?$/;
 
@@ -175,7 +175,7 @@ function validLcov(path: string) {
 
 function lcovStep(line: string, open: boolean): { open: boolean; hit: boolean } | null {
   if (line.startsWith("SF:")) return open ? null : { open: true, hit: false };
-  if (line.startsWith("end_of_record")) return { open: false, hit: false };
+  if (line === "end_of_record") return open ? { open: false, hit: false } : null;
   if (!line.startsWith("DA:")) return { open, hit: false };
   return open && DA_LINE.test(line) ? { open, hit: true } : null;
 }

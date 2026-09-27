@@ -69,6 +69,15 @@ describe("built-in coverage commands append to $QG_LCOV", () => {
     expect([r.status, /tests: 1 touched test file\(s\) red \(1 failed, exit 1\)/.test(r.stdout), r.stdout.includes("tests/red")]).toEqual([1, true, true]);
   }, 60_000);
 
+  test("pytest full gate (uv with pytest-cov): the child's record for src/x.py is in lcov.info", () => {
+    const pyTest = `import subprocess\n\n\ndef test_child():\n    subprocess.run(["sh", "-c", ${JSON.stringify(appendLine("src/x.py").replaceAll("\\\\", "\\"))}], check=True)\n`;
+    const repo = nodeRepo({ "src/x.py": "x = 1\n", "tests/test_x.py": pyTest }, "", false);
+    write(repo, ".quality.toml", TOML.replace('language = "ts"', 'language = "py"'));
+    commit(repo, "py");
+    fullGate(repo);
+    expect(read(repo, `${OUT}/lcov.info`)).toContain("SF:src/x.py\nDA:1,1\nend_of_record\n");
+  }, 180_000);
+
   test("lcov.info of an earlier full run is not counted: two runs, no stale or doubled records", () => {
     const repo = nodeRepo({ "src/calc.ts": CALC, "src/x.ts": X, "src/x.test.ts": childTest("node", "src/x.ts") });
     fullGate(repo);
@@ -90,4 +99,27 @@ describe("the full gate checks the lcov structure", () => {
     const report = read(repo, `${OUT}/report.md`);
     expect([r.status, /^tests: ERROR invalid coverage at \S+lcov\.info, see \S+tests\.log$/m.test(r.stdout), r.stdout.includes("invalid coverage (CRAP and mean not judged"), /cov \d+%/.test(report), /CRAP \d/.test(report)]).toEqual([1, true, true, false, false]);
   }, 60_000);
+});
+
+// Version 2: end_of_record only as the exact line and only inside an open record.
+describe("the lcov terminator (full gate, plain check, --skip-tests)", () => {
+  const BROKEN: [string, string][] = [
+    ["an orphan end_of_record before the first SF", "end_of_record\\nSF:src/calc.ts\\nDA:1,1\\nend_of_record\\n"],
+    ["a second terminator", "SF:src/calc.ts\\nDA:1,1\\nend_of_record\\nend_of_record\\n"],
+    ["end_of_recordX", "SF:src/calc.ts\\nDA:1,1\\nend_of_recordX\\n"],
+  ];
+  const INVALID = /^tests: ERROR invalid coverage at \S+lcov\.info, see \S+tests\.log$/m;
+  for (const [name, lcov] of BROKEN) {
+    test(`${name}: invalid coverage, exit 1, in each`, () => {
+      const repo = nodeRepo({ "src/calc.ts": CALC });
+      write(repo, ".quality.toml", TOML.replace('base = "HEAD"', `base = "HEAD"\ntest_cmd = '''printf '${lcov}' > "$QG_LCOV"'''`));
+      commit(repo, "cmd");
+      write(repo, "src/calc.ts", CALC.replace("a + b", "b + a"));
+      commit(repo, "change");
+      const full = fullGate(repo);
+      const plain = quality(["check", "--repo", repo, "--since", "HEAD~1", "--no-deps"]);
+      const skip = quality(["--repo", repo, "--no-deps", "--skip-tests"]);
+      expect([full, plain, skip].map((r) => [r.status, INVALID.test(r.stdout)])).toEqual([[1, true], [1, true], [1, true]]);
+    }, 90_000);
+  }
 });
