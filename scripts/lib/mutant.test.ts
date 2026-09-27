@@ -224,6 +224,26 @@ describe("mutant restore and state", () => {
     expect([unread.status, unread.stdout.includes("mutant state without a readable owner, kept"), existsSync(join(broken, LOCK, "owner.json"))]).toEqual([2, true, true]);
   }, 60_000);
 
+  test("a leftover owner.json that points outside the repo or names another repo: nothing written, state kept, exit 2", () => {
+    const outside = tmp();
+    const victim = join(outside, "victim.ts");
+    const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+    const cases = [
+      (repo: string) => ({ file: relative(repo, victim), repo }),
+      (repo: string) => ({ file: victim, repo }),
+      (repo: string) => ({ file: "src/calc.ts", repo: outside }),
+    ];
+    for (const owner of cases) {
+      const repo = calcRepo();
+      writeFileSync(victim, "mutant bytes\n");
+      const current = owner(repo).file === "src/calc.ts" ? ADD_NEG : "mutant bytes\n";
+      write(repo, `${LOCK}/${owner(repo).file.split("/").pop()}.orig`, "original bytes\n");
+      write(repo, `${LOCK}/owner.json`, JSON.stringify({ pid: deadPid(), started_at: new Date().toISOString(), original_sha256: hash("original bytes\n"), mutant_sha256: hash(current), ...owner(repo) }));
+      const r = mutant(repo, ...SURVIVES);
+      expect([r.status, r.stdout.startsWith("MUTANT ERROR: "), readFileSync(victim, "utf8"), read(repo, "src/calc.ts"), existsSync(join(repo, LOCK, "owner.json"))]).toEqual([2, true, "mutant bytes\n", ADD_NEG, true]);
+    }
+  }, 60_000);
+
   test("a second mutant while one runs: MUTANT ERROR with the pid; a live pid holds the lock at any age", async () => {
     const repo = calcRepo(secondRun("sleep 30"));
     const before = sha(repo);

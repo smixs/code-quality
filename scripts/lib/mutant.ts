@@ -175,7 +175,7 @@ function recoverLeftover(o: Opts, state: State, fs: MutantFs) {
   const owner = readOwner(state);
   if (!owner) throw new MutantError(`mutant state without a readable owner, kept: ${state.lock}; inspect it and remove it`);
   if (alive(owner.pid)) throw new MutantError(`another mutant is running (pid ${owner.pid})`);
-  const abs = resolve(o.repo, owner.file);
+  const abs = leftoverTarget(o, state, owner);
   const orig = state.orig(owner.file);
   const current = regularSha(abs);
   if (current === owner.original_sha256) {
@@ -188,6 +188,30 @@ function recoverLeftover(o: Opts, state: State, fs: MutantFs) {
   if (sha256(bytes) !== owner.original_sha256 || !restoreBytes(abs, bytes, fs)) throw new MutantError(`restore failed, original at ${orig}`);
   removeState(state);
   console.log(`restored leftover mutant of ${owner.file}`);
+}
+
+// owner.json is data on disk: it must name this repo and a normalized path inside it, and the target
+// must pass the check made before a mutant write. Anything else writes nothing and keeps the state.
+function leftoverTarget(o: Opts, state: State, owner: Owner) {
+  const kept = `; state kept at ${state.lock}`;
+  if (realOrEmpty(String(owner.repo)) !== realOrEmpty(o.repo)) throw new MutantError(`leftover mutant state names another repo (${owner.repo})${kept}`);
+  if (isAbsolute(owner.file) || normalize(owner.file) !== owner.file || owner.file.startsWith("..")) throw new MutantError(`leftover mutant state names a path outside the repo (${owner.file})${kept}`);
+  const abs = resolve(o.repo, owner.file);
+  if (!existsSync(abs)) return abs;
+  try {
+    regularInRepo(o, abs, owner.file);
+  } catch (e) {
+    throw new MutantError(`${(e as Error).message}${kept}`);
+  }
+  return abs;
+}
+
+function realOrEmpty(path: string) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return "";
+  }
 }
 
 // sha256 of a regular non-symlink file; "" for anything else.
