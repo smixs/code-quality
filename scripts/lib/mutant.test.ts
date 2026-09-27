@@ -229,8 +229,20 @@ describe("mutant restore and state", () => {
   const deadPid = () => spawnSync("true").pid!;
   const leftover = (repo: string, owner: Record<string, unknown>) => {
     write(repo, `${LOCK}/calc.ts.orig`, ADD_NEG);
-    write(repo, `${LOCK}/owner.json`, JSON.stringify({ pid: deadPid(), started_at: new Date().toISOString(), repo, file: "src/calc.ts", original_sha256: sha(repo), mutant_sha256: "m".repeat(64), ...owner }));
+    write(repo, `${LOCK}/owner.json`, JSON.stringify({ pid: deadPid(), started_at: new Date().toISOString(), repo, file: "src/calc.ts", original_sha256: sha(repo), mutant_sha256: "a".repeat(64), ...owner }));
   };
+
+  for (const [name, bad] of [["file {}", { file: {} }], ["pid -1", { pid: -1 }], ["a short sha", { original_sha256: "abc" }]] as const) {
+    test(`owner.json with ${name}: malformed mutant state, nothing written, state kept, exit 2`, () => {
+      const repo = calcRepo();
+      write(repo, "src/calc.ts", ADD_NEG.replace("a + b", "a - b"));
+      const mutated = sha(repo);
+      leftover(repo, { mutant_sha256: mutated, ...bad });
+      const r = mutant(repo, ...SURVIVES);
+      const owner = join(repo, LOCK, "owner.json");
+      expect([r.status, r.stdout.trim(), sha(repo), existsSync(owner), existsSync(join(repo, LOCK, "calc.ts.orig"))]).toEqual([2, `MUTANT ERROR: malformed mutant state ${owner}; original at ${join(repo, LOCK, "calc.ts.orig")}`, mutated, true, true]);
+    }, 60_000);
+  }
 
   test("leftover state: original bytes = stale state removed; a third state or unreadable owner = kept, exit 2", () => {
     const stale = calcRepo();
@@ -238,13 +250,13 @@ describe("mutant restore and state", () => {
     const r = mutant(stale, ...SURVIVES);
     expect([r.stdout.split("\n")[0], r.status]).toEqual(["removed stale mutant state of src/calc.ts", 1]);
     const third = calcRepo();
-    leftover(third, { original_sha256: "o".repeat(64) });
+    leftover(third, { original_sha256: "b".repeat(64) });
     const kept = mutant(third, ...SURVIVES);
     expect([kept.status, kept.stdout.includes("target changed after the mutant process died; original kept at"), existsSync(join(third, LOCK, "calc.ts.orig"))]).toEqual([2, true, true]);
     const broken = calcRepo();
     write(broken, `${LOCK}/owner.json`, "{not json");
     const unread = mutant(broken, ...SURVIVES);
-    expect([unread.status, unread.stdout.includes("mutant state without a readable owner, kept"), existsSync(join(broken, LOCK, "owner.json"))]).toEqual([2, true, true]);
+    expect([unread.status, unread.stdout.includes(`MUTANT ERROR: malformed mutant state ${join(broken, LOCK, "owner.json")}`), existsSync(join(broken, LOCK, "owner.json"))]).toEqual([2, true, true]);
   }, 60_000);
 
   test("a leftover owner.json that points outside the repo or names another repo: nothing written, state kept, exit 2", () => {

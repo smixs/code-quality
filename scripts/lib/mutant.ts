@@ -150,13 +150,29 @@ const gitStatus = (o: Opts, file: string) => run("git", ["status", "--porcelain"
 
 // ---- state: lock/, then .orig, then owner.json (each tmp then rename), and only then the mutant
 
+// owner.json is data on disk: it counts only when every field has its type. null = missing or malformed.
 function readOwner(state: State): Owner | null {
   try {
-    const owner = JSON.parse(readFileSync(state.owner, "utf8")) as Owner;
-    return typeof owner.pid === "number" && owner.file && owner.original_sha256 && owner.mutant_sha256 ? owner : null;
+    const owner = JSON.parse(readFileSync(state.owner, "utf8"));
+    return validOwner(owner) ? owner : null;
   } catch {
     return null;
   }
+}
+
+const SHA256 = /^[0-9a-f]{64}$/;
+
+function validOwner(value: unknown): value is Owner {
+  if (!value || typeof value !== "object") return false;
+  const owner = value as Record<string, unknown>;
+  const strings = ["repo", "file", "started_at"].every((key) => typeof owner[key] === "string");
+  const shas = [owner.original_sha256, owner.mutant_sha256].every((sha) => typeof sha === "string" && SHA256.test(sha));
+  return Number.isInteger(owner.pid) && (owner.pid as number) > 0 && strings && shas;
+}
+
+function malformed(state: State) {
+  const orig = existsSync(state.lock) ? readdirSync(state.lock).find((name) => name.endsWith(".orig")) : undefined;
+  return `malformed mutant state ${state.owner}; original at ${orig ? join(state.lock, orig) : "(no .orig in the state)"}`;
 }
 
 // A lock whose pid is alive is live at any age; only a dead pid's state is recovered.
@@ -172,7 +188,7 @@ function alive(pid: number) {
 function recoverLeftover(o: Opts, state: State, fs: MutantFs) {
   if (!existsSync(state.lock)) return;
   const owner = readOwner(state);
-  if (!owner) throw new MutantError(`mutant state without a readable owner, kept: ${state.lock}; inspect it and remove it`);
+  if (!owner) throw new MutantError(malformed(state));
   if (alive(owner.pid)) throw new MutantError(`another mutant is running (pid ${owner.pid})`);
   const abs = leftoverTarget(o, state, owner);
   const orig = state.orig(owner.file);
