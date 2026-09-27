@@ -61,6 +61,17 @@ describe("check --since <rev> --tests", () => {
     expect(read(repo, `${OUT}/check.md`)).toMatch(/cov 100% src\/calc\.ts:1-4/);
   }, 60_000);
 
+  test("package.json without vitest and a bun.lock: the touched run goes through bun, not node --test", () => {
+    const bunTest = (...cases: string[]) => `import { test, expect } from "bun:test";\nimport { add } from "./calc.ts";\n${cases.join("\n")}\n`;
+    const repo = nodeRepo({ "bun.lock": "{}\n", "src/calc.ts": ADD, "src/calc.test.ts": bunTest('test("add", () => expect(add(1, 2)).toBe(3));') });
+    write(repo, "src/calc.ts", ADD_NEG);
+    write(repo, "src/calc.test.ts", bunTest('test("add", () => expect(add(1, 2)).toBe(3));', 'test("neg", () => expect(add(-1, 2)).toBe(2));'));
+    commit(repo);
+    const r = checkTests(repo);
+    expect([r.status, /pass in [\d.]+s, coverage fresh \(touched\)/.test(r.stdout), r.stdout.includes("bun test"), r.stdout.includes("node --test")]).toEqual([0, true, true, false]);
+    expect(read(repo, `${OUT}/check.md`)).toMatch(/cov 100% src\/calc\.ts:1-4/);
+  }, 60_000);
+
   test("a failing touched test is tests/red with the log path; exit 1; the run directory is kept", () => {
     const repo = changedRepo([ADD_TEST, 'test("neg", () => assert.equal(add(-1, 2), 99));']);
     const r = checkTests(repo);
@@ -444,6 +455,18 @@ describe("runner summaries", () => {
   test("a log without the runner's summary is an error, not zero", () => {
     expect(parseTestSummary("node", "hello\n")).toEqual({ error: "no node test summary in the log" });
     expect(parseTestSummary("py", readFileSync(join(FIXTURES, "node-pass.log"), "utf8"))).toEqual({ error: "no pytest test summary in the log" });
+  });
+
+  test("runner: vitest in package.json wins over a bun lockfile; bun.lock or bun.lockb picks bun; else node", () => {
+    const cmds = (pkg: string, lock = "") => {
+      const repo = tmp();
+      if (lock) writeFileSync(join(repo, lock), "");
+      const input = { repo, lang: "ts", readPackage: () => pkg, tests: { touched_cmd: "", mutant_cmd: "" }, testCmd: "" };
+      return mutantTestCommand(input);
+    };
+    const pkg = '{"name":"x"}';
+    const vitest = '{"devDependencies":{"vitest":"5.0.2"}}';
+    expect([cmds(vitest, "bun.lock"), cmds(pkg, "bun.lock"), cmds(pkg, "bun.lockb"), cmds(pkg), cmds("")]).toEqual(["npx vitest run {files}", "bun test {files}", "bun test {files}", "node --test {files}", "bun test {files}"]);
   });
 
   test("a language without a file-aware command: touched runs its full coverage with a note; mutant has none", () => {

@@ -100,11 +100,13 @@ const PY_TOUCHED_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-re
 export type Runner = "node" | "bun" | "vitest" | "py";
 export const RUNNERS: Runner[] = ["node", "bun", "vitest", "py"];
 
+// vitest in package.json, else a bun lockfile at the repo root means bun, else node; no package.json is bun.
 function runnerOf(repo: string, lang: string, readPackage: (path: string) => string): Runner {
   if (lang === "py") return "py";
   const pkg = readPackage(join(repo, "package.json"));
   if (!pkg) return "bun";
-  return pkg.includes('"vitest"') ? "vitest" : "node";
+  if (pkg.includes('"vitest"')) return "vitest";
+  return existsSync(join(repo, "bun.lock")) || existsSync(join(repo, "bun.lockb")) ? "bun" : "node";
 }
 
 const FULL_COVERAGE: Record<Runner, string> = { node: NODE_TEST_COVERAGE, bun: BUN_TEST_COVERAGE, vitest: VITEST_COVERAGE, py: PY_TEST_COVERAGE };

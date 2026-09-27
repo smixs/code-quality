@@ -54,7 +54,9 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   with `note: tests/touched not supported for <lang>`. `mutant_cmd` - the test command of `mutant`, must
   contain `{files}` and print a node, bun, vitest or pytest summary; the default is the adapter's
   file-aware test command (`node --test {files}`, `bun test {files}`, `npx vitest run {files}`,
-  `uv run --with pytest pytest -q {files}`), other languages need it set. `max_load` (default: twice the CPU
+  `uv run --with pytest pytest -q {files}`), other languages need it set. The TS/JS runner: `vitest` in
+  `package.json` -> vitest; else `bun.lock` or `bun.lockb` at the repo root -> bun; else node (no
+  `package.json` -> bun). `max_load` (default: twice the CPU
   count, since a shared machine idles near its CPU count; `0` = no wait) and `load_wait_s` (600): before every test run (full gate, `check --tests`,
   pre-push, `mutant`) the gate waits while the 1-minute load average is above `max_load`, polling every
   10 s up to `load_wait_s`, then runs anyway with `note: tests/load ran at load X.X after Ns`.

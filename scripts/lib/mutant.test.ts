@@ -107,6 +107,14 @@ describe("mutant outcomes", () => {
     expect([r.status, r.stdout.trim()]).toEqual([0, "MUTANT KILLED: 1 failing test(s) in src/calc.test.ts"]);
   }, 60_000);
 
+  test("package.json without vitest and a bun.lockb: the mutant runs its tests through bun, KILLED", () => {
+    const bunTest = 'import { test, expect } from "bun:test";\nimport { add } from "./calc.ts";\ntest("add", () => expect(add(1, 2)).toBe(3));\n';
+    const repo = nodeRepo({ "bun.lockb": "", "src/calc.ts": ADD_NEG, "src/calc.test.ts": bunTest });
+    const before = sha(repo);
+    const r = mutant(repo, ...KILLS);
+    expect([r.status, r.stdout.trim(), sha(repo), noState(repo)]).toEqual([0, "MUTANT KILLED: 1 failing test(s) in src/calc.test.ts", before, true]);
+  }, 60_000);
+
   test("bun output in two buckets: the failures of both are summed, KILLED", () => {
     const buckets = 'printf " 2 pass\\nRan 4 tests across 2 files.\\n 2 fail\\n 0 fail\\n"; exit 1';
     const green = 'printf " 2 pass\\n 0 fail\\nRan 2 tests across 1 file.\\n"; : {files}';
