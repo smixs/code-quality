@@ -71,6 +71,7 @@ No card: the lead assembles a draft from existing commands and runs it once. Sav
 - The lead records base SHA and head SHA. The executor does not touch the candidate until the verdict.
 - Each lane works in its own worktree detached at head (`git worktree add --detach`). Mutants run only in the QA lane's throwaway worktree. Evidence goes outside the worktrees, into the task folder `.scratch/work/<task>/`.
 - Before the start each lane is "required" or "n/a: reason". Lanes start in one message. Code reading runs in parallel. Heavy commands (tests, mutants, builds, browsers) queue by the card's machine limits; waiting for a resource is not a hang.
+- Nothing runs hidden. Every lane except the QA subagent runs in a terminal pane the owner can watch (Herdr: `herdr pane run <pane> "<command>; herdr agent prompt <lead> '<lane>: <result>'"`); the pane reports to the lead itself as its last command. No `nohup`, `&`, background tasks or watchers for the work. Fewer shell panes than lanes: one script runs the lanes in turn in one pane; QA is the longest lane anyway.
 - Unattended work starts with a resource check: every required model and tool answers a short probe, and every role has a named substitute.
 - Target for the pass: one hour after resources are ready. Each lane has its own limit. A stuck lane gets one restart and one substitute from the roster. After that the state is `WAITING_RESOURCE` with the state saved, never "done".
 
@@ -120,7 +121,7 @@ When the lanes are back, the lead writes the verdict per [references/verdict-and
 - The landing run per the card: rebase on origin/main, typecheck, lint, the full suite **once** with a wait for a free machine, the build, the QA mutant on the new SHA with its tests only, fast-forward merge, push. A red test outside the task is named and checked on the base.
 - After a rebase the gate and the full suite always run on the new SHA. Reviewer and QA verdicts carry over when `git patch-id` of the change is unchanged; otherwise the changed part is checked as in §6.
 - Release and deploy only on the owner's word and by the project's runbook. After the deploy the same scenario runs in production (the card's "after release" surface).
-- Techniques for landing, mutants, PBT and headless reviewers: [references/techniques.md](references/techniques.md).
+- Techniques for landing, mutants, PBT and reviewers in a pane: [references/techniques.md](references/techniques.md).
 
 ## 9. The done table and the report
 

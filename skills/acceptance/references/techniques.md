@@ -20,9 +20,9 @@ The process is in SKILL.md; this file holds only the how.
 - A mutation caught only by reading the source with a regex does not count.
 - Report: the mutant, the exact test that went red, the seed or input.
 
-## Headless reviewers
+## Reviewers in a visible pane
 
-- `codex exec` started from a script or in the background waits for stdin and hangs: always `codex exec … < /dev/null`, output with `-o <file>`.
+- `codex exec` started from a script waits for stdin and hangs: always `codex exec … < /dev/null`, output with `-o <file>`.
 - A reviewer in a terminal session gets the brief as a file path, not pasted text.
 
 ## Landing
