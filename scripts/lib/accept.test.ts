@@ -192,6 +192,20 @@ describe("check --since <rev> --tests", () => {
     expect([r.status, r.stdout.includes("touched tests: 0 by name, 0 by direct import, 1 by second-hop import")]).toEqual([0, true]);
   }, 60_000);
 
+  test("second-hop selection ignores intermediates in node_modules and re-exports", () => {
+    const cases = [
+      { "node_modules/kit/harness.ts": 'import { label } from "../../src/button.tsx";\nexport const render = () => label("a");\n', "src/view.test.ts": 'import { render } from "../node_modules/kit/harness.ts";\nrender();\n' },
+      { "src/barrel.ts": 'export { label } from "./button.tsx";\n', "src/view.test.ts": 'import { label } from "./barrel.ts";\nlabel("a");\n' },
+    ];
+    for (const files of cases) {
+      const repo = nodeRepo({ "src/button.tsx": "export const label = (x: string) => x;\n", ...files }, `touched_cmd = '''printf '${lcovOf("src/button.tsx", [1])}' > "$QG_LCOV"; : {files}'''`);
+      write(repo, "src/button.tsx", "export const label = (x: string) => `${x}!`;\n");
+      commit(repo);
+      const r = checkTests(repo);
+      expect([r.status, r.stdout.includes("touched tests: 0 by name, 0 by direct import, 0 by second-hop import")]).toEqual([1, true]);
+    }
+  }, 60_000);
+
   test("two concurrent scopes each read only their own run directory", async () => {
     const failing = (name: string) => `import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { ${name} } from "./${name}.ts";\ntest("${name}", () => assert.equal(${name}(), 0));\n`;
     const cmd = 'sleep 1; node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination="$QG_LCOV" --test-reporter=spec --test-reporter-destination=stdout {files}';

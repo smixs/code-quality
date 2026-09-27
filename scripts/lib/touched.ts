@@ -43,17 +43,21 @@ function importingTests(o: Opts, files: string[], depth: 1 | 2) {
   const tests = tsFiles.filter((file) => isTestFile(o.langs, file));
   const direct = tests.filter((test) => fileImports(o.repo, test, sources, aliases));
   if (depth < 2) return { direct, secondHop: [] };
-  const middles = tsFiles.filter((file) => !sources.includes(file) && fileImports(o.repo, file, sources, aliases));
+  // Intermediates: repo TS files outside node_modules that import the source; a re-export is no import.
+  const middles = tsFiles.filter((file) => !sources.includes(file) && !/(^|\/)node_modules\//.test(file) && fileImports(o.repo, file, sources, aliases, false));
   const secondHop = tests.filter((test) => !direct.includes(test) && fileImports(o.repo, test, middles.filter((file) => file !== test), aliases));
   return { direct, secondHop };
 }
 
 type Alias = { pattern: string; target: string };
 
-function fileImports(repo: string, test: string, sources: string[], aliases: Alias[]) {
+const REEXPORT = /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*["'`][^"'`]+["'`]/g;
+
+function fileImports(repo: string, test: string, sources: string[], aliases: Alias[], reexports = true) {
   const path = join(repo, test);
   if (!existsSync(path)) return false;
-  const modules = [...readFileSync(path, "utf8").matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
+  const text = readFileSync(path, "utf8");
+  const modules = [...(reexports ? text : text.replace(REEXPORT, "")).matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
   return modules.some((module) => sources.some((source) => importTargets(test, module, source, aliases)));
 }
 
