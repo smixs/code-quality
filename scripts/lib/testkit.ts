@@ -64,8 +64,9 @@ export function quality(args: string[], env: Record<string, string> = {}): Run {
 }
 
 // A running quality.ts, for signals and concurrency.
-export function qualityAsync(args: string[], env: Record<string, string> = {}) {
+export function qualityAsync(args: string[], env: Record<string, string> = {}, input = "") {
   const child = spawn(process.execPath, [SCRIPT, ...args], { env: laneEnv(env) });
+  child.stdin.end(input);
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (d) => (stdout += d));
@@ -73,6 +74,18 @@ export function qualityAsync(args: string[], env: Record<string, string> = {}) {
   const done = new Promise<Run>((resolve) => child.on("close", (status) => resolve({ status, stdout, stderr })));
   return { child, done };
 }
+
+export function alive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A test command that starts a long sleep in its process group and records the sleep's pid.
+export const SLEEPER = "sleep 30 & echo $! > sleep.pid; wait; : {files}";
 
 export async function until(ok: () => boolean, ms = 30_000) {
   const end = Date.now() + ms;

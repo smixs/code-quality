@@ -136,7 +136,7 @@ export async function runTouchedCoverage(o: Opts, tests: string[], cmd: string) 
   const lcov = join(dir, "lcov.info");
   mkdirSync(dir, { recursive: true });
   const env = { ...process.env, QG_LCOV: lcov, QG_DIR: dir };
-  const r = await runTestProcess(o, { cmd: cmd.replaceAll("{files}", tests.map(shq).join(" ")), log: join(dir, "tests.log"), timeoutS: Number(o.toml.tests.touched_timeout_s), env });
+  const r = await runTestProcess(o, { cmd: cmd.replaceAll("{files}", tests.map(shq).join(" ")), log: join(dir, "tests.log"), timeoutS: Number(o.toml.tests.touched_timeout_s), env, kept: dir });
   const failed = countFailed(readText(r.log));
   const valid = !r.timedOut && validLcov(lcov);
   const result: Tests = { scope: "touched", lcov, code: r.code, failed, skipped: false, red: r.code !== 0 || (failed ?? 0) > 0, used: valid };

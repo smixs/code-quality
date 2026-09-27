@@ -9,7 +9,7 @@ import { buildOpts, DEFAULTS, loadToml, readArgs } from "./config.ts";
 import { parseTestSummary } from "./crap.ts";
 import { mutantTestCommand, type Runner, touchedCoverageCommand } from "./lang.ts";
 import { waitForLoad } from "./load.ts";
-import { ADD, ADD_NEG, ADD_TEST, cleanup, commit, git, laneEnv, NEG_TEST, nodeRepo, nodeTest, quality, qualityAsync, read, SCRIPT, tmp, until, write } from "./testkit.ts";
+import { ADD, ADD_NEG, ADD_TEST, alive, cleanup, commit, git, laneEnv, NEG_TEST, nodeRepo, nodeTest, quality, qualityAsync, read, SCRIPT, SLEEPER, tmp, until, write } from "./testkit.ts";
 
 afterAll(cleanup);
 
@@ -87,17 +87,22 @@ describe("check --since <rev> --tests", () => {
     const repo = changedRepo([ADD_TEST], `touched_timeout_s = 1\ntouched_cmd = 'sleep 30 & echo $! > sleep.pid; wait; : {files}'`);
     const r = checkTests(repo);
     const pid = Number(read(repo, "sleep.pid"));
-    const alive = () => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    await until(() => !alive(), 5_000);
+    await until(() => !alive(pid), 5_000);
     expect([r.status, r.stdout.includes("tests/timeout after 1s")]).toEqual([1, true]);
   }, 60_000);
+
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+    test(`${signal} during the touched run kills its process group, prints the kept run directory, exit ${code}`, async () => {
+      const repo = changedRepo([ADD_TEST], `touched_cmd = '${SLEEPER}'`);
+      const run = qualityAsync(["check", "--repo", repo, "--since", "HEAD~1", "--tests", "--no-deps"]);
+      await until(() => existsSync(join(repo, "sleep.pid")) && read(repo, "sleep.pid").trim() !== "");
+      const pid = Number(read(repo, "sleep.pid"));
+      run.child.kill(signal);
+      const r = await run.done;
+      const kept = /tests: run files kept at (\S+)/.exec(r.stdout)?.[1] ?? "";
+      expect([r.status, alive(pid), kept.includes("/touched/run-"), existsSync(kept)]).toEqual([code, false, true, true]);
+    }, 60_000);
+  }
 
   const invalid: [string, string][] = [
     ["nothing written", "true"],

@@ -261,7 +261,7 @@ async function locked(o: Opts, state: State, plan: Plan, fs: MutantFs): Promise<
   process.on("SIGINT", onInt);
   process.on("SIGTERM", onTerm);
   const runTests = (log: string) => {
-    child = startTestRun(o, { cmd: plan.cmd.replaceAll("{files}", plan.tests.map(shq).join(" ")), log: join(o.out, log), timeoutS: Number(o.toml.tests.mutant_timeout_s) });
+    child = startTestRun(o, { cmd: plan.cmd.replaceAll("{files}", plan.tests.map(shq).join(" ")), log: join(o.out, log), timeoutS: Number(o.toml.tests.mutant_timeout_s), signals: "caller" });
     return child.done;
   };
   try {

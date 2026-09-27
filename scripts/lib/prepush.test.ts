@@ -4,7 +4,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { ADD, ADD_NEG, ADD_TEST, cleanup, commit, git, laneEnv, NEG_TEST, nodeRepo, nodeTest, read, SCRIPT, tmp, write } from "./testkit.ts";
+import { ADD, ADD_NEG, ADD_TEST, alive, cleanup, commit, git, laneEnv, NEG_TEST, nodeRepo, nodeTest, qualityAsync, read, SCRIPT, SLEEPER, tmp, until, write } from "./testkit.ts";
 
 afterAll(cleanup);
 
@@ -82,6 +82,19 @@ describe("pre-push judges the pushed commit", () => {
     const r = push(c.wt, [branch(c), `refs/tags/v1 ${tag} refs/tags/v1 ${c.base}`]);
     expect([tag !== c.b, r.status, r.started]).toEqual([true, 0, true]);
   }, 60_000);
+
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+    test(`${signal} during the pre-push tests kills their process group, exit ${code}`, async () => {
+      const c = twoCheckouts(NEG_TEST);
+      write(c.wt, ".quality.toml", read(c.wt, ".quality.toml").replace("pre_push_test_cmd = 'touch started; node --test {files}'", `pre_push_test_cmd = '${SLEEPER}'`));
+      const run = qualityAsync(["hook", "pre-push", "--repo", c.wt, "--no-deps"], {}, `${branch(c)}\n`);
+      await until(() => existsSync(join(c.wt, "sleep.pid")) && read(c.wt, "sleep.pid").trim() !== "");
+      const pid = Number(read(c.wt, "sleep.pid"));
+      run.child.kill(signal);
+      const r = await run.done;
+      expect([r.status, alive(pid)]).toEqual([code, false]);
+    }, 60_000);
+  }
 
   test("a deletion push checks nothing and runs nothing", () => {
     const { main } = twoCheckouts(NEG_TEST);
