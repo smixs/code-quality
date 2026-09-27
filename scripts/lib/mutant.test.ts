@@ -84,6 +84,15 @@ describe("mutant outcomes", () => {
     expect([r.status, r.stdout.includes("MUTANT ERROR: the mutated run timed out after 2s"), sha(repo), noState(repo)]).toEqual([2, true, before, true]);
   }, 60_000);
 
+  test("the load wait runs once, before the preflight; none between the mutant write and its run", () => {
+    const repo = calcRepo("max_load = 1\nload_wait_s = 2\nmutant_cmd = 'date +%s >> started; node --test {files}'");
+    const t0 = Date.now();
+    const r = quality(["mutant", "--repo", repo, "--file", "src/calc.ts", "--find=a + b", "--replace=a - b"], { QG_TEST_LOADAVG: "5" });
+    const [pre, mutated] = read(repo, "started").trim().split("\n").map(Number);
+    const waits = r.stdout.split("\n").filter((line) => line.startsWith("tests: waited")).length;
+    expect([r.status, waits, pre >= Math.floor(t0 / 1000) + 2, mutated - pre < 2]).toEqual([0, 1, true, true]);
+  }, 60_000);
+
   test("a custom mutant_cmd may print another known runner's summary (bun in a node repo)", () => {
     const bunTest = 'import { test, expect } from "bun:test";\nimport { add } from "./calc.ts";\ntest("add", () => expect(add(1, 2)).toBe(3));\n';
     const repo = nodeRepo({ "src/calc.ts": ADD_NEG, "src/calc.test.ts": bunTest }, "mutant_cmd = 'bun test {files}'");

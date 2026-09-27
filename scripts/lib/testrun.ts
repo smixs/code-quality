@@ -12,15 +12,16 @@ import { withoutRepoVars } from "./util.ts";
 
 // timeoutS: Infinity = no timeout and no process group (the full gate). A grouped run owns SIGINT and
 // SIGTERM while it lasts: it kills the group, prints `kept` when set, and exits 130 or 143; a caller
-// with its own restore order (mutant) passes signals: "caller".
-export type RunSpec = { cmd: string; log: string; timeoutS: number; env?: NodeJS.ProcessEnv; kept?: string; signals?: "exit" | "caller" };
+// with its own restore order (mutant) passes signals: "caller". loadWait: false = the caller waited
+// already (mutant waits once before its preflight, never between the mutant write and its run).
+export type RunSpec = { cmd: string; log: string; timeoutS: number; env?: NodeJS.ProcessEnv; kept?: string; signals?: "exit" | "caller"; loadWait?: boolean };
 export type RunResult = { code: number; timedOut: boolean; secs: string; log: string };
 export type TestRun = { done: Promise<RunResult>; kill: () => Promise<void> };
 
 const GONE_WAIT_MS = 5000;
 
 export function startTestRun(o: Opts, spec: RunSpec): TestRun {
-  waitForLoad(o);
+  if (spec.loadWait !== false) waitForLoad(o);
   mkdirSync(dirname(spec.log), { recursive: true });
   const fd = openSync(spec.log, "w");
   const t0 = Date.now();

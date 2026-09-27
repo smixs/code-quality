@@ -8,6 +8,7 @@ import { basename, dirname, isAbsolute, join, normalize, relative, resolve } fro
 import { type Args, buildOpts, type Opts } from "./config.ts";
 import { parseTestSummary } from "./crap.ts";
 import { isTestFile, mutantTestCommand, type Runner, testRunner } from "./lang.ts";
+import { waitForLoad } from "./load.ts";
 import { type RunResult, startTestRun, type TestRun } from "./testrun.ts";
 import { ACCEPTANCE, touchedTestSelection } from "./touched.ts";
 import { run, shq } from "./util.ts";
@@ -54,6 +55,7 @@ export async function runMutant(o: Opts, input: MutantInput, fs: MutantFs = real
     const state = stateOf(o);
     recoverLeftover(o, state, fs);
     const plan = prepare(o, input);
+    waitForLoad(o);
     lock(o, state, plan.target);
     return await locked(o, state, plan, fs);
   } catch (e) {
@@ -261,7 +263,7 @@ async function locked(o: Opts, state: State, plan: Plan, fs: MutantFs): Promise<
   process.on("SIGINT", onInt);
   process.on("SIGTERM", onTerm);
   const runTests = (log: string) => {
-    child = startTestRun(o, { cmd: plan.cmd.replaceAll("{files}", plan.tests.map(shq).join(" ")), log: join(o.out, log), timeoutS: Number(o.toml.tests.mutant_timeout_s), signals: "caller" });
+    child = startTestRun(o, { cmd: plan.cmd.replaceAll("{files}", plan.tests.map(shq).join(" ")), log: join(o.out, log), timeoutS: Number(o.toml.tests.mutant_timeout_s), signals: "caller", loadWait: false });
     return child.done;
   };
   try {
