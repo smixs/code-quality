@@ -39,6 +39,24 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   adapter: `node --test {files}`, for Python `uv run --with pytest pytest -q {files}`), `pre_push_timeout` (seconds), `pre_push_max_tests`
   (at most 40 test files per push). For TS/JS the selection includes direct relative imports,
   `require` and aliases from `tsconfig.json` `compilerOptions.paths`; dependency depth is one import.
+  `check --tests` and `mutant` take every touched test and also count a test that reaches the source
+  through one intermediate repo file (test -> harness or module -> source).
+- `[tests]` - test runs the gate starts. `touched_cmd` - the coverage command of `check --tests`, must
+  contain `{files}` (the touched test list, shell-quoted) and write lcov to `$QG_LCOV` (`$QG_DIR` = its
+  private run directory); without it `project.test_cmd` is used when it contains `{files}`, else the
+  adapter's file-aware command (node, bun, vitest, pytest; `note: tests/touched: project.test_cmd has no
+  {files}` when a `test_cmd` without `{files}` is set). Other languages run their full coverage command
+  with `note: tests/touched not supported for <lang>`. `mutant_cmd` - the test command of `mutant`, must
+  contain `{files}` and print a node, bun, vitest or pytest summary; the default is the adapter's
+  file-aware test command (`node --test {files}`, `bun test {files}`, `npx vitest run {files}`,
+  `uv run --with pytest pytest -q {files}`), other languages need it set. `max_load` (default: twice the CPU
+  count, since a shared machine idles near its CPU count; `0` = no wait) and `load_wait_s` (600): before every test run (full gate, `check --tests`,
+  pre-push, `mutant`) the gate waits while the 1-minute load average is above `max_load`, polling every
+  10 s up to `load_wait_s`, then runs anyway with `note: tests/load ran at load X.X after Ns`.
+  `touched_timeout_s` (900) - `check --tests`; `mutant_timeout_s` (300) - each of the two `mutant`
+  runs. A timeout kills the run's whole process group. `[hooks] pre_push_timeout` still bounds pre-push.
+  The environment variable `QG_TEST_LOADAVG` replaces the load reading; it exists for the gate's own
+  tests only.
 - `[review]` `jev` (default `false`), `jev_provider` (`auto` | `typesafe` | `openrouter` | `custom`;
   `auto` = TypeSafe when `TYPESAFE_API_KEY` is set, else OpenRouter when `OPENROUTER_API_KEY` is set),
   `jev_url`, `jev_key_env`, `jev_model` (empty = the default of the chosen provider:

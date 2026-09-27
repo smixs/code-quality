@@ -67,7 +67,8 @@ flowchart LR
 
 - **One bar.** Cyclomatic complexity 10, CRAP 30, 80% coverage of added lines, no new cycles, no new dead code, no secrets.
 - **Old debt does not block.** A baseline snapshot keeps existing findings as debt. Only new findings on changed lines fail.
-- **Seconds, not minutes.** `check` runs in 3-19 s on a real repo. The full gate with tests and coverage is a manual run.
+- **Seconds, not minutes.** `check` runs in 3-19 s on a real repo. The full gate with tests and coverage is a manual run: a debt measurement, not a verdict on a change.
+- **Acceptance on the change.** `check --since <base> --tests` runs the change's touched tests with coverage and judges the change with it. `mutant` proves a test catches one exact bug and always restores the file.
 - **Any language.** Complexity from lizard, coverage from lcov, adapters for TypeScript, Python, Go, Rust, Java, Kotlin, C#, Swift, PHP, Ruby, C/C++, Dart.
 
 ## Install

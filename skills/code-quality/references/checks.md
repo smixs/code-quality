@@ -28,8 +28,33 @@ Old debt does not block, it lives in the baseline and in `check --all`.
 | `tamper/assertion-weakened` | fewer assertions in the hunk, or an exact `assert.equal` / `expect(...).toEqual` / unittest / Python `assert x == y` replaced by a truthy/existence check; removing `readFileSync` checks of source text is allowed when they move into new tests without lowering the total assertion count | block; `qg:test-removed` lifts `tamper/test-deleted` only |
 | `tamper/mock-added` | a test mocks a module that is not among the changed sources, or a local stub shadows an imported/exported function of a source file | a note with file, line, name and source |
 | `tamper/baseline-touched` | sources change together with the baseline or the thresholds; an allow marker mixed with other code | block; a separate change of a service file gives a note |
-| `tamper/no-tests-ran` | `pre-push` sees sources but finds no changed, neighbouring or directly importing test | block until a test exists or `qg:no-test <reason>` |
-| `cov/diff` | less than 80% of added executable lines covered | lcov defines the executable lines; the output lists up to 20 uncovered `file:line` |
+| pre-push tree | the touched tests run on the checked-out tree: a pushed ref that adds files and does not peel to `HEAD`, or uncommitted changes in a pushed file or a selected test | block before any test runs: `pre-push: pushing <sha> (<ref>), this checkout is at <sha>; ...` or `pre-push: uncommitted changes in files the touched tests read: <paths>`; dirt elsewhere does not block |
+| `tamper/no-tests-ran` | `pre-push` or `check --tests` sees sources but finds no changed, neighbouring or importing test | block until a test exists or `qg:no-test <reason>` |
+| `cov/diff` | less than 80% of added executable lines covered | lcov defines the executable lines; the output lists up to 20 uncovered `file:line`; with `check --tests` a changed source missing from the touched lcov also blocks |
+| `tests/red` | `check --tests`: a touched test fails | block; the line names the log in the private run directory, which is kept |
+| `tests/timeout` | `check --tests`: the touched run exceeds `[tests] touched_timeout_s` | block; the run's process group is killed |
+| `tests: ERROR invalid coverage` | `check --tests`: the run exits 0 but its lcov is missing, empty, unreadable or has no `SF` record with `DA` lines | block |
+
+## Acceptance and mutants
+
+`check --since <base> --tests` is the verdict on a change. The full gate is a debt measurement: it is
+red on old debt, so it says nothing about one change. The touched coverage lives in
+`<out_dir>/touched/run-<pid>-<random>/` and is read by that invocation only; the full gate,
+`--skip-tests`, `--update-baseline` and a plain `check` never read it. Repo-wide report sections (mean,
+median, drift, worklist, hotspots, top CRAP) say `n/a: touched coverage is not repo-wide`; the report
+lists the changed functions with their touched coverage instead.
+
+`mutant --file <path> --find <exact text> --replace <text> [--test <path>]...` checks that the tests
+catch one concrete bug. The find text must occur exactly once in a regular UTF-8 file inside the repo
+without staged changes. `--test` replaces the automatic selection and must name repo test files. The
+selected tests first run on the original bytes (they must pass and run at least one test), then with
+the mutation. Ran and failed come from the runner summary (node, bun, vitest, pytest; fixtures in
+`scripts/fixtures/summaries/`). KILLED (exit 0) needs at least one failed test; SURVIVED (exit 1) needs
+exit 0, no failure and at least one test; anything else, a timeout or an unreadable summary is
+`MUTANT ERROR` (exit 2). State lives in `<out_dir>/mutant/lock/` (`<name>.orig`, `owner.json`): a live
+pid holds the lock; a dead one's mutant is restored by the next run, and a target that is neither the
+original nor the mutant is kept with its `.orig` for a person to decide. Node counts a test file
+without tests as one passing test.
 
 `[escalate] paths` (auth, for example) prints `note: reviewer paths touched` and does not block: the
 reviewer is not wired yet.

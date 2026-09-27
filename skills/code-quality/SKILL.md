@@ -15,7 +15,11 @@ One script, `scripts/quality.ts`, called by every entry point. Only deterministi
 | `commit-msg` | `git commit` | AI attribution, glossary words in the message | < 1 s |
 | `pre-push` | `git push` | tamper per pushed commit, tests touched by name and by import, diff coverage, Gitleaks, OSV audit | up to 1 min |
 | agent Stop | the agent ends a turn | `check` against `project.base`; red = one round of fixes | 10-20 s |
-| manual | before a large push, or to measure | full gate: tests with coverage, mean CRAP, worklist, hotspots | 3-6 min |
+| acceptance | a lead accepts a change | `check --since <base> --tests`: the change's touched tests with coverage, then the gate judges the change with that coverage | the touched tests + 10-20 s |
+| mutant | proving the tests catch a bug | `mutant`: one exact mutation, the touched tests, a guaranteed restore, the verdict in the exit code | two runs of the touched tests |
+| manual | to measure the repo | full gate, a debt measurement, not a verdict on a change: tests with coverage, mean CRAP, worklist, hotspots | 3-6 min |
+
+The acceptance verdict on a change is `check --since <base> --tests`. The full gate is red on old debt, so its verdict says nothing about one change; run it to measure the repo.
 
 CRAP needs fresh lcov (`<out_dir>/lcov.info`, by default `.scratch/quality`, with a matching fingerprint). Without it a fast entry point prints `tests: not run, no fresh lcov` and judges complexity only. A change of docs and config only (`.md`, `.toml`, `.json`, `.yml` outside `project.src`) prints `scope: docs-only` and skips the code checks.
 
@@ -32,7 +36,15 @@ bun $Q check --repo <repo>               # fast gate on the change (what the Sto
 bun $Q check --repo <repo> --staged      # the staged change (what pre-commit runs)
 bun $Q check --repo <repo> --since <rev> # the diff rev..HEAD
 bun $Q check --repo <repo> --all         # whole repo, baseline ignored: measure debt and noise
+bun $Q check --repo <repo> --since <base> --tests   # acceptance: touched tests with coverage, then the gate
+bun $Q mutant --repo <repo> --file <path> --find <exact text> --replace <text> [--test <path>]...
 ```
+
+`check --tests` needs exactly one `--since`. It selects the touched tests (by name, by import, and through one intermediate file for TS), runs all of them with coverage into a private `<out_dir>/touched/run-*/` directory, and judges the change with that coverage: a red test is `tests/red`, a timeout `tests/timeout`, low coverage of added lines `cov/diff`. That coverage never feeds the full gate, `--skip-tests` or the baseline.
+
+`mutant` runs the selected tests on the original file first, then with the one mutation: exit 0 `MUTANT KILLED` (a test failed), 1 `MUTANT SURVIVED` (they stayed green), 2 `MUTANT ERROR` (anything unclear). The file is restored and proven by sha256 on every outcome, including Ctrl-C; a run killed with SIGKILL is restored by the next `mutant`. Each run appends one JSON line to `<out_dir>/mutants.log`. A value that starts with `-` goes as `--find=<text>`.
+
+Every test run the gate starts (full gate, `--tests`, pre-push, `mutant`) first waits while the 1-minute load is above `[tests] max_load` (twice the CPU count by default), up to `[tests] load_wait_s`, and prints `tests: waited Ns for load X.X (max M)`.
 
 Flags beat `.quality.toml`: `--config`, `--baseline`, `--src a,b`, `--base <ref>`, `--test-cmd`, `--max-cc`, `--max-crap`, `--forbid from:to`, `--knip-ignore`, `--allow-red-tests`, `--no-deps`.
 
@@ -69,7 +81,8 @@ Why these numbers, and how CRAP is computed: [references/checks.md](references/c
 | rule family | catches |
 |---|---|
 | `crap`, `form/*` | complexity, CRAP, cognitive complexity, size and params over the bar on changed functions |
-| `cov/diff` | added executable lines covered below `diff_coverage` (blocks in the full gate and `pre-push`) |
+| `cov/diff` | added executable lines covered below `diff_coverage` (blocks in the full gate, `pre-push` and `check --tests`) |
+| `tests/red`, `tests/timeout` | a touched test fails or runs over `[tests] touched_timeout_s` in `check --tests` |
 | `tamper/*` | deleted or skipped test, weakened assertion, baseline or guarded config changed with code, no tests ran |
 | `deps/cycle`, `dead/*`, `dup/jscpd`, `ast/*` | new cycle, new unused export, new clone, empty catch, catch that only logs, textual test |
 | `secret/*`, `secret/gitleaks`, `deps/audit`, `deps/lock-age` | tokens and keys, history secrets, new vulnerability, too-young lock entry |
@@ -84,9 +97,9 @@ Full rule table with how each one works: [references/checks.md](references/check
 Every bypass needs a reason and leaves a `note: bypass <rule> <source> <reason>` line in the report.
 
 - Deleting a test block: `qg:test-removed <reason>` in the commit message (or in `<out_dir>/allow.md` for `check --staged` and Stop).
-- `pre-push` with no test found: `qg:no-test <reason>` in a pushed commit message.
+- `pre-push` or `check --since <rev> --tests` with no test found: `qg:no-test <reason>` in a commit message of the change. With `--tests` no tests run then, changed functions are judged by complexity only and `cov/diff` prints `not run`.
 - A deliberate secret in a fixture: `qg:allow <reason>` or `gitleaks:allow <reason>` on the line.
-- Changing `src`, thresholds, `[security]`, `[hooks]`, `[review]`, `[knip]`, `[layers]`, `[docs]`, `[glossary] allow` together with source code is blocked; change them in a separate commit.
+- Changing `src`, thresholds, `[security]`, `[hooks]`, `[tests]`, `[review]`, `[knip]`, `[layers]`, `[docs]`, `[glossary] allow` together with source code is blocked; change them in a separate commit.
 
 ## Jev
 
@@ -94,7 +107,10 @@ An optional classifier: five yes/no questions on added test hunks, `change_untes
 
 ## Common mistakes
 
-- Reading `GATE PASS` as "tests green": a fast entry point never runs tests. Check the `tests:` line.
+- Reading `GATE PASS` as "tests green": a fast entry point never runs tests. Check the `tests:` line; `check --tests` is the one that runs them.
+- Running the full gate to accept a change: it measures debt. Accept with `check --since <base> --tests`.
+- Mutating by hand with `cp` and `sed`: `mutant` does the one exact edit and always restores.
+- Pushing another branch from this checkout: `pre-push` runs the touched tests on the checked-out tree, so it blocks unless the checkout is at the pushed commit and the files those tests read are committed. Push from that branch's worktree.
 - Judging the mean CRAP: it is a note. What blocks is changed functions and ratchet findings.
 - A partial `git add -p`: `pre-commit` refuses a file that also has unstaged edits. Stage it whole.
 - husky in `npm install` rewrites `core.hooksPath`: run `install-hooks` again after installing dependencies.
