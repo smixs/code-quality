@@ -9,6 +9,8 @@ import { buildOpts, DEFAULTS, loadToml, readArgs } from "./config.ts";
 import { parseTestSummary } from "./crap.ts";
 import { mutantTestCommand, type Runner, touchedCoverageCommand } from "./lang.ts";
 import { waitForLoad } from "./load.ts";
+import { touchedTests } from "./hooks.ts";
+import { ACCEPTANCE, touchedTestSelection } from "./touched.ts";
 import { ADD, ADD_NEG, ADD_TEST, alive, cleanup, commit, git, laneEnv, NEG_TEST, nodeRepo, nodeTest, quality, qualityAsync, read, SCRIPT, SLEEPER, tmp, until, write } from "./testkit.ts";
 
 afterAll(cleanup);
@@ -254,6 +256,59 @@ describe("check --since <rev> --tests", () => {
     expect([covers(dirB, "a.ts"), covers(dirB, "b.ts"), covers(dirAB, "a.ts"), covers(dirAB, "b.ts")]).toEqual([false, true, true, true]);
     expect([rb.stdout.includes(`log ${dirB}/tests.log`), rab.stdout.includes(`log ${dirAB}/tests.log`)]).toEqual([true, true]);
   }, 90_000);
+});
+
+describe("selection of render tests (sotish admin shape)", () => {
+  const SCREEN = "export const ThemePanel = (x: string) => x;\n";
+  const HARNESS = 'export async function render() {\n  const { ThemePanel } = await import("./ThemePanel");\n  return ThemePanel("a");\n}\n';
+  const RENDER_TEST = (name: string) => `import { resolve } from "node:path";\nimport { runHarness } from "./run-harness.ts";\nrunHarness(resolve(import.meta.dir, "${name}"));\n`;
+  const fakeLcov = (file: string) => `touched_cmd = '''printf '${lcovOf(file, [1])}' > "$QG_LCOV"; : {files}'''`;
+  const counts = (r: { stdout: string }) => /^touched tests: .*$/m.exec(r.stdout)?.[0] ?? "";
+  const change = (repo: string, file: string) => {
+    write(repo, file, read(repo, file).replace("(x: string) => x", "(x: string) => `${x}!`"));
+    commit(repo);
+    return checkTests(repo);
+  };
+
+  test("names: X.render.test.ts beside X.tsx is a named test of X.tsx", () => {
+    const repo = nodeRepo({ "src/ThemePanel.tsx": SCREEN, "src/ThemePanel.render.test.ts": 'import { test } from "node:test";\ntest("renders", () => {});\n' }, fakeLcov("src/ThemePanel.tsx"));
+    const r = change(repo, "src/ThemePanel.tsx");
+    expect([r.status, counts(r)]).toEqual([0, "touched tests: 1 by name, 0 by direct import, 0 by second-hop import"]);
+  }, 60_000);
+
+  test("literals: a test passing the harness path as a string reaches the screen the harness imports", () => {
+    const repo = nodeRepo({ "src/ThemePanel.tsx": SCREEN, "src/ThemePanel.render-harness.tsx": HARNESS, "src/run-harness.ts": "export const runHarness = (path: string) => path;\n", "src/panel-screen.test.ts": RENDER_TEST("ThemePanel.render-harness.tsx") }, fakeLcov("src/ThemePanel.tsx"));
+    const r = change(repo, "src/ThemePanel.tsx");
+    expect([r.status, counts(r)]).toEqual([0, "touched tests: 0 by name, 0 by direct import, 1 by second-hop import"]);
+  }, 60_000);
+
+  test("literals: strings that name no tracked file (a word, a URL, a missing path, an untracked file) select nothing and crash nothing", () => {
+    const strings = ["hello", "https://example.com/src/ThemePanel.tsx", "missing.tsx", "../../../etc/hosts", "", "untracked.tsx", "${x}.tsx"];
+    const test = `const names = ${JSON.stringify(strings)};\nnames.length;\n`;
+    const repo = nodeRepo({ "src/ThemePanel.tsx": SCREEN, "src/other.test.ts": test }, fakeLcov("src/ThemePanel.tsx"));
+    write(repo, "src/untracked.tsx", SCREEN);
+    write(repo, ".gitignore", ".scratch/\nsrc/untracked.tsx\n");
+    const r = change(repo, "src/ThemePanel.tsx");
+    expect([r.status, counts(r), r.stdout.includes("tamper/no-tests-ran"), r.stderr]).toEqual([1, "touched tests: 0 by name, 0 by direct import, 0 by second-hop import", true, ""]);
+  }, 60_000);
+
+  test("depth: a component three steps away (test -> harness -> screen -> component) is not selected", () => {
+    const repo = nodeRepo({
+      "src/Badge.tsx": "export const Badge = (x: string) => x;\n",
+      "src/ThemePanel.tsx": 'import { Badge } from "./Badge.tsx";\nexport const ThemePanel = (x: string) => Badge(x);\n',
+      "src/ThemePanel.render-harness.tsx": HARNESS,
+      "src/run-harness.ts": "export const runHarness = (path: string) => path;\n",
+      "src/panel-screen.test.ts": RENDER_TEST("ThemePanel.render-harness.tsx"),
+    }, fakeLcov("src/Badge.tsx"));
+    const r = change(repo, "src/Badge.tsx");
+    expect([r.status, counts(r)]).toEqual([1, "touched tests: 0 by name, 0 by direct import, 0 by second-hop import"]);
+  }, 60_000);
+
+  test("pre-push selection is unchanged: no stem names, no path literals", () => {
+    const repo = nodeRepo({ "src/ThemePanel.tsx": SCREEN, "src/ThemePanel.render.test.ts": "\n", "src/ThemePanel.render-harness.tsx": HARNESS, "src/panel-screen.test.ts": RENDER_TEST("ThemePanel.tsx") });
+    const o = buildOpts(readArgs(["check", "--repo", repo]));
+    expect([touchedTests(o, ["src/ThemePanel.tsx"]), touchedTestSelection(o, ["src/ThemePanel.tsx"], ACCEPTANCE).tests]).toEqual([[], ["src/ThemePanel.render.test.ts", "src/panel-screen.test.ts"]]);
+  }, 60_000);
 });
 
 describe("full consumers never look at touched/", () => {

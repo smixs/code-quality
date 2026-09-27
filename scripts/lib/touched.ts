@@ -1,7 +1,7 @@
 // Touched tests of a change: by name for every adapter, by import for TS. pre-push and check --tests
 // select with it; source changed and no test selected is tamper/no-tests-ran unless qg:no-test.
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, normalize } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, dirname, join, normalize } from "node:path";
 import type { Opts } from "./config.ts";
 import { adapterForFile, isTestFile, siblingTestFiles } from "./lang.ts";
 import { isProjectSource } from "./tamper.ts";
@@ -11,15 +11,18 @@ export function touchedTests(o: Opts, files: string[]) {
   return touchedTestSelection(o, files).tests;
 }
 
-// Pre-push: its cap and direct imports. check --tests and mutant: every test, and depth 2 also counts a
-// test that reaches the source through one intermediate repo file (test -> harness or module -> source).
-export type SelectionOptions = { maxTests: number; depth: 1 | 2 };
-export const ACCEPTANCE: SelectionOptions = { maxTests: Infinity, depth: 2 };
-const prePushSelection = (o: Opts): SelectionOptions => ({ maxTests: Number(o.toml.hooks.pre_push_max_tests), depth: 1 });
+// Pre-push: its cap, <stem>.test names and direct imports. check --tests and mutant: every test; depth 2
+// also counts a test that reaches the source through one intermediate repo file (test -> harness or
+// module -> source); stemNames counts <stem>.<anything>.test.<ext> beside the source; pathLiterals
+// counts a quoted path in a test that names a tracked file. A source three steps away (test -> harness
+// -> screen -> component) stays unselected; the project's full run covers it.
+export type SelectionOptions = { maxTests: number; depth: 1 | 2; stemNames: boolean; pathLiterals: boolean };
+export const ACCEPTANCE: SelectionOptions = { maxTests: Infinity, depth: 2, stemNames: true, pathLiterals: true };
+const prePushSelection = (o: Opts): SelectionOptions => ({ maxTests: Number(o.toml.hooks.pre_push_max_tests), depth: 1, stemNames: false, pathLiterals: false });
 
 export function touchedTestSelection(o: Opts, files: string[], options: SelectionOptions = prePushSelection(o)) {
-  const named = existingNamedTests(o, files);
-  const imports = importingTests(o, files, options.depth);
+  const named = existingNamedTests(o, files, options.stemNames);
+  const imports = importingTests(o, files, options);
   const direct = imports.direct.filter((file) => !named.includes(file));
   const hop = imports.secondHop.filter((file) => !named.includes(file) && !direct.includes(file));
   const max = Math.max(0, Math.floor(options.maxTests));
@@ -30,22 +33,33 @@ export function touchedTestSelection(o: Opts, files: string[], options: Selectio
   return { tests: [...byName, ...byImport, ...bySecondHop], byName: byName.length, byImport: byImport.length, bySecondHop: bySecondHop.length, omitted, max };
 }
 
-function existingNamedTests(o: Opts, files: string[]) {
-  const candidates = files.flatMap((file) => (isTestFile(o.langs, file) ? [file] : siblingTestFiles(o.langs, file)));
+function existingNamedTests(o: Opts, files: string[], stemNames: boolean) {
+  const candidates = files.flatMap((file) => (isTestFile(o.langs, file) ? [file] : [...siblingTestFiles(o.langs, file), ...(stemNames ? stemTests(o, file) : [])]));
   return [...new Set(candidates)].filter((file) => existsSync(join(o.repo, file))).sort();
 }
 
-function importingTests(o: Opts, files: string[], depth: 1 | 2) {
+// Test files in the source's folder named <stem>.<anything>: ThemePanel.render.test.ts for ThemePanel.tsx.
+function stemTests(o: Opts, file: string) {
+  const dir = dirname(file);
+  const name = basename(file);
+  const stem = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
+  if (!existsSync(join(o.repo, dir))) return [];
+  return readdirSync(join(o.repo, dir)).filter((entry) => entry.startsWith(`${stem}.`)).map((entry) => (dir === "." ? entry : `${dir}/${entry}`)).filter((test) => isTestFile(o.langs, test));
+}
+
+function importingTests(o: Opts, files: string[], options: SelectionOptions) {
   const sources = files.filter((file) => isProjectSource(o, file) && adapterForFile(o.langs, file)?.id === "ts");
   if (!sources.length) return { direct: [], secondHop: [] };
   const aliases = tsAliases(o.repo);
-  const tsFiles = lines(gitPaths(o.repo, "ls-files")).filter((file) => adapterForFile(o.langs, file)?.id === "ts").sort();
+  const tracked = lines(gitPaths(o.repo, "ls-files"));
+  const tsFiles = tracked.filter((file) => adapterForFile(o.langs, file)?.id === "ts").sort();
   const tests = tsFiles.filter((file) => isTestFile(o.langs, file));
-  const direct = tests.filter((test) => fileImports(o.repo, test, sources, aliases));
-  if (depth < 2) return { direct, secondHop: [] };
+  const testRules: ImportRules = { reexports: true, literals: options.pathLiterals ? new Set(tracked) : null };
+  const direct = tests.filter((test) => fileImports(o.repo, test, sources, aliases, testRules));
+  if (options.depth < 2) return { direct, secondHop: [] };
   // Intermediates: repo TS files outside node_modules that import the source; a re-export is no import.
-  const middles = tsFiles.filter((file) => !sources.includes(file) && !/(^|\/)node_modules\//.test(file) && fileImports(o.repo, file, sources, aliases, false));
-  const secondHop = tests.filter((test) => !direct.includes(test) && fileImports(o.repo, test, middles.filter((file) => file !== test), aliases));
+  const middles = tsFiles.filter((file) => !sources.includes(file) && !/(^|\/)node_modules\//.test(file) && fileImports(o.repo, file, sources, aliases, { reexports: false, literals: null }));
+  const secondHop = tests.filter((test) => !direct.includes(test) && fileImports(o.repo, test, middles.filter((file) => file !== test), aliases, testRules));
   return { direct, secondHop };
 }
 
@@ -53,12 +67,24 @@ type Alias = { pattern: string; target: string };
 
 const REEXPORT = /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*["'`][^"'`]+["'`]/g;
 
-function fileImports(repo: string, test: string, sources: string[], aliases: Alias[], reexports = true) {
+// reexports: export ... from counts as an import; literals: the tracked files a quoted path may name
+// (tests only), null = strings are not imports.
+type ImportRules = { reexports: boolean; literals: Set<string> | null };
+
+function fileImports(repo: string, test: string, sources: string[], aliases: Alias[], rules: ImportRules = { reexports: true, literals: null }) {
   const path = join(repo, test);
   if (!existsSync(path)) return false;
   const text = readFileSync(path, "utf8");
-  const modules = [...(reexports ? text : text.replace(REEXPORT, "")).matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
+  if (rules.literals && pathLiterals(repo, test, text, rules.literals).some((file) => sources.includes(file))) return true;
+  const modules = [...(rules.reexports ? text : text.replace(REEXPORT, "")).matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
   return modules.some((module) => sources.some((source) => importTargets(test, module, source, aliases)));
+}
+
+// A quoted string in a test that resolves from the test's folder to an existing tracked file:
+// runHarness(resolve(import.meta.dir, "ThemePanel.render-harness.tsx")).
+function pathLiterals(repo: string, test: string, text: string, tracked: Set<string>) {
+  const strings = [...text.matchAll(/"([^"\n]+)"|'([^'\n]+)'|`([^`$\n]+)`/g)].map((match) => match[1] ?? match[2] ?? match[3]);
+  return strings.map((value) => normalize(join(dirname(test), value))).filter((file) => tracked.has(file) && existsSync(join(repo, file)));
 }
 
 function importTargets(test: string, module: string, source: string, aliases: Alias[]) {
