@@ -336,13 +336,20 @@ describe("runner summaries", () => {
 });
 
 describe("guarded config", () => {
-  test("a [tests] key changed together with code is tamper/baseline-touched", () => {
-    const repo = nodeRepo({ "src/calc.ts": ADD, "src/calc.test.ts": nodeTest(ADD_TEST) });
-    write(repo, ".quality.toml", `${read(repo, ".quality.toml")}\n[tests]\nmax_load = 0\n`);
-    write(repo, "src/calc.ts", ADD_NEG);
-    git(repo, "add", "-A");
-    const r = quality(["check", "--repo", repo, "--staged", "--no-deps"]);
-    expect([r.status, r.stdout.includes("protected config changed: tests.max_load")]).toEqual([1, true]);
+  const values: [string, string][] = [["touched_cmd", "'true {files}'"], ["mutant_cmd", "'true {files}'"], ["max_load", "0"], ["load_wait_s", "1"], ["touched_timeout_s", "5"], ["mutant_timeout_s", "5"]];
+  for (const [key, value] of values) {
+    test(`[tests] ${key} changed together with code is tamper/baseline-touched`, () => {
+      const repo = nodeRepo({ "src/calc.ts": ADD, "src/calc.test.ts": nodeTest(ADD_TEST) });
+      write(repo, ".quality.toml", `${read(repo, ".quality.toml")}\n[tests]\n${key} = ${value}\n`);
+      write(repo, "src/calc.ts", ADD_NEG);
+      git(repo, "add", "-A");
+      const r = quality(["check", "--repo", repo, "--staged", "--no-deps"]);
+      expect([r.status, r.stdout.includes(`protected config changed: tests.${key}`)]).toEqual([1, true]);
+    }, 60_000);
+  }
+
+  test("a [tests] value in .quality.toml reaches the options", () => {
+    const repo = nodeRepo({ "src/calc.ts": ADD }, "max_load = 0");
     expect(buildOpts(readArgs(["check", "--repo", repo])).toml.tests.max_load).toBe(0);
-  }, 60_000);
+  });
 });

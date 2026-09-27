@@ -527,7 +527,7 @@ function markerChanges(ch: Changes): Protected[] {
 const PROTECTED_CONFIG: Record<string, string[] | "*"> = {
   project: ["src"], thresholds: "*", security: "*",
   hooks: ["pre_push_test_cmd", "pre_push_max_tests", "pre_push_timeout"],
-  tests: ["touched_cmd", "max_load", "load_wait_s", "mutant_timeout_s"],
+  tests: ["touched_cmd", "mutant_cmd", "max_load", "load_wait_s", "touched_timeout_s", "mutant_timeout_s"],
   secrets: ["allow_users"], review: "*", knip: ["ignore"], layers: "*",
   docs: ["globs", "history_globs"], glossary: ["allow"],
 };
