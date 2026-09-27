@@ -13,8 +13,9 @@ import { git, gitPaths, lines, refuse, run, shq } from "./util.ts";
 export type Range = { start: number; end: number; col: number; nested: [number, number][] };
 export type Fn = Range & { file: string; name: string; key: string; cc: number; cov: number | null; crap: number | null };
 export type Coverage = "run" | "reuse" | "fresh-or-none";
-// scope "touched": in memory only, the coverage of `check --tests` read in the same process.
-export type Tests = { scope?: "touched"; lcov: string; code: number; failed: number | null; skipped: boolean; red: boolean; used: boolean; lastRun?: { written: string; commit: string } };
+// scope "touched": in memory only, the coverage of `check --tests` read in the same process;
+// removed: its run directory goes after a passing verdict, so the report must not offer the path.
+export type Tests = { scope?: "touched"; removed?: boolean; lcov: string; code: number; failed: number | null; skipped: boolean; red: boolean; used: boolean; lastRun?: { written: string; commit: string } };
 
 export const TS_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 export const TS_SKIP = /(\.d\.ts$|\.(test|spec)\.|(^|\/)(fixtures|__tests__|node_modules|dist|build|\.scratch)\/)/;

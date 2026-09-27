@@ -57,7 +57,7 @@ function stats(o: Opts, fns: Fn[]) {
 const pct = (c: number | null) => (c === null ? "no data" : `${Math.round(c * 100)}%`);
 
 export function testsLine(t: Tests) {
-  if (t.scope === "touched") return `tests: touched run exit ${t.code}, failed ${t.failed ?? "unknown"}, lcov ${t.used ? t.lcov : "none"}`;
+  if (t.scope === "touched") return `tests: touched run exit ${t.code}, failed ${t.failed ?? "unknown"}, lcov ${t.used ? t.lcov : "none"}${t.used && t.removed ? " (removed after the verdict)" : ""}`;
   if (t.skipped && t.lastRun) return `tests: not run (last full run ${t.lastRun.written}, ${t.lastRun.commit.slice(0, 8)})`;
   if (!t.used) return "tests: not run, no fresh lcov (CRAP and mean not judged; complexity only)";
   return `tests exit ${t.code}, failed ${t.failed ?? "unknown"}`;

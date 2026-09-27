@@ -37,6 +37,17 @@ describe("check --since <rev> --tests", () => {
     expect([r.status, runDirs(repo), existsSync(join(repo, OUT, "lcov.info"))]).toEqual([0, [], false]);
   }, 60_000);
 
+  test("the report marks the lcov of a removed run directory; a kept one stays a live path", () => {
+    const pass = changedRepo();
+    expect(checkTests(pass).status).toBe(0);
+    const removed = /lcov (\S+lcov\.info) \(removed after the verdict\)/.exec(read(pass, `${OUT}/check.md`))?.[1] ?? "";
+    expect([removed.includes("/touched/run-"), existsSync(removed)]).toEqual([true, false]);
+    const red = changedRepo([ADD_TEST, 'test("neg", () => assert.equal(add(-1, 2), 99));']);
+    expect(checkTests(red).status).toBe(1);
+    const kept = /lcov (\S+lcov\.info)$/m.exec(read(red, `${OUT}/check.md`))?.[1] ?? "";
+    expect([kept.includes("/touched/run-"), existsSync(kept)]).toEqual([true, true]);
+  }, 60_000);
+
   test("bun (no package.json): the file-aware bun coverage command judges the change", () => {
     const bunTest = (...cases: string[]) => `import { test, expect } from "bun:test";\nimport { add } from "./calc.ts";\n${cases.join("\n")}\n`;
     const repo = nodeRepo({ "src/calc.ts": ADD, "src/calc.test.ts": bunTest('test("add", () => expect(add(1, 2)).toBe(3));') }, "", false);

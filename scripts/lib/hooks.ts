@@ -78,6 +78,7 @@ export async function runCheck(o: Opts, jev: JevDeps = defaultJev()) {
   const lane = o.flags.tests === true ? await acceptanceTests(o) : null;
   const a = analyze(o, "fresh-or-none", lane?.tests);
   if (lane) a.checks.push(...lane.checks);
+  if (lane?.dir && !lane.failed) a.tests.removed = true;
   const g = gate(o, a);
   const report = writeReport(o, a, g, "check.md");
   const notes = o.toml.review.jev ? await jevNotes(o, a.ch, jev) : [];
