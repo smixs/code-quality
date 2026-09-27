@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, WHOLE } from "./diff.ts";
 import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot, type Runner, RUNNERS } from "./lang.ts";
@@ -14,8 +14,9 @@ export type Range = { start: number; end: number; col: number; nested: [number, 
 export type Fn = Range & { file: string; name: string; key: string; cc: number; cov: number | null; crap: number | null };
 export type Coverage = "run" | "reuse" | "fresh-or-none";
 // scope "touched": in memory only, the coverage of `check --tests` read in the same process;
-// removed: its run directory goes after a passing verdict, so the report must not offer the path.
-export type Tests = { scope?: "touched"; removed?: boolean; lcov: string; code: number; failed: number | null; skipped: boolean; red: boolean; used: boolean; lastRun?: { written: string; commit: string } };
+// removed: its run directory goes after a passing verdict, so the report must not offer the path;
+// invalid: the full lcov failed the structural check (the error text), so it is never parsed.
+export type Tests = { scope?: "touched"; removed?: boolean; invalid?: string; lcov: string; code: number; failed: number | null; skipped: boolean; red: boolean; used: boolean; lastRun?: { written: string; commit: string } };
 
 export const TS_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 export const TS_SKIP = /(\.d\.ts$|\.(test|spec)\.|(^|\/)(fixtures|__tests__|node_modules|dist|build|\.scratch)\/)/;
@@ -68,13 +69,15 @@ type TestMeta = { commit: string; fingerprint: string; code: number; failed: num
 
 const lastRun = (m: TestMeta) => ({ written: m.written ?? "unknown date", commit: m.commit });
 
+// The touched run's structural check applies to the full lcov too: a broken one is never parsed.
 const testsFrom = (lcov: string, m: TestMeta, skipped: boolean): Tests => ({
+  ...(validLcov(lcov) ? {} : { invalid: `invalid coverage at ${lcov}, see ${join(dirname(lcov), "tests.log")}` }),
   lcov,
   code: m.code,
   failed: m.failed,
   skipped,
   red: m.code !== 0 || (m.failed ?? 0) > 0,
-  used: true,
+  used: validLcov(lcov),
   lastRun: lastRun(m),
 });
 

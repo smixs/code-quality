@@ -79,3 +79,15 @@ describe("built-in coverage commands append to $QG_LCOV", () => {
     expect([...first, records(repo, "src/x.ts"), records(repo, "src/calc.ts")]).toEqual([1, 1, 0, 1]);
   }, 90_000);
 });
+
+describe("the full gate checks the lcov structure", () => {
+  test("a DA after end_of_record: tests: ERROR invalid coverage, exit 1, no CRAP number", () => {
+    const repo = nodeRepo({ "src/calc.ts": CALC });
+    const cmd = `printf 'SF:src/calc.ts\\nDA:2,1\\nend_of_record\\nDA:1,1\\n' > "$QG_LCOV"`;
+    write(repo, ".quality.toml", TOML.replace('base = "HEAD"', `base = "HEAD"\ntest_cmd = '''${cmd}'''`));
+    commit(repo, "cmd");
+    const r = fullGate(repo);
+    const report = read(repo, `${OUT}/report.md`);
+    expect([r.status, /^tests: ERROR invalid coverage at \S+lcov\.info, see \S+tests\.log$/m.test(r.stdout), r.stdout.includes("invalid coverage (CRAP and mean not judged"), /cov \d+%/.test(report), /CRAP \d/.test(report)]).toEqual([1, true, true, false, false]);
+  }, 60_000);
+});

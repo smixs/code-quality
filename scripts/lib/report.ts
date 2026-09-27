@@ -59,6 +59,7 @@ const pct = (c: number | null) => (c === null ? "no data" : `${Math.round(c * 10
 export function testsLine(t: Tests) {
   if (t.scope === "touched") return `tests: touched run exit ${t.code}, failed ${t.failed ?? "unknown"}, lcov ${t.used ? t.lcov : "none"}${t.used && t.removed ? " (removed after the verdict)" : ""}`;
   if (t.skipped && t.lastRun) return `tests: not run (last full run ${t.lastRun.written}, ${t.lastRun.commit.slice(0, 8)})`;
+  if (t.invalid) return `tests exit ${t.code}, failed ${t.failed ?? "unknown"}, invalid coverage (CRAP and mean not judged; complexity only)`;
   if (!t.used) return "tests: not run, no fresh lcov (CRAP and mean not judged; complexity only)";
   return `tests exit ${t.code}, failed ${t.failed ?? "unknown"}`;
 }

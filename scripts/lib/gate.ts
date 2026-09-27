@@ -45,6 +45,7 @@ export function analyze(o: Opts, mode: Coverage, supplied?: Tests) {
   const adapterTools = projectAdapterChecks(o, adapterAudit);
   const checks = [
     notedCheck("crap/tools", [], "", toolNotices),
+    ...(tests.invalid ? [check("tests", [], tests.invalid)] : []),
     tamperCheck(o, ch),
     diffCoverageCheck(o, ch, tests, { lowCoverage: strictCoverage, missingFiles: strictCoverage }),
     formCheck(o, ch, all),
