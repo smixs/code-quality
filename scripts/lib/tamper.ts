@@ -221,7 +221,7 @@ function allowFile(o: Opts) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
-function commitMessages(o: Opts) {
+export function commitMessages(o: Opts) {
   if (o.scope.kind === "all" || o.scope.kind === "staged") return "";
   const from = o.scope.kind === "since" ? o.scope.rev : run("git", ["merge-base", o.base, "HEAD"], o.repo).out.trim();
   if (!from) return "";
@@ -527,6 +527,7 @@ function markerChanges(ch: Changes): Protected[] {
 const PROTECTED_CONFIG: Record<string, string[] | "*"> = {
   project: ["src"], thresholds: "*", security: "*",
   hooks: ["pre_push_test_cmd", "pre_push_max_tests", "pre_push_timeout"],
+  tests: ["touched_cmd", "max_load", "load_wait_s", "mutant_timeout_s"],
   secrets: ["allow_users"], review: "*", knip: ["ignore"], layers: "*",
   docs: ["globs", "history_globs"], glossary: ["allow"],
 };

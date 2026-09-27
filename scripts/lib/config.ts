@@ -1,5 +1,6 @@
 // Options = CLI flag, else <repo>/.quality.toml (a worktree falls back to its main checkout's), else default. Unknown toml keys fail fast.
 import { existsSync, readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { adapterById, detectLanguageRoots, validateRegistryUrls } from "./lang.ts";
@@ -36,6 +37,10 @@ export const DEFAULTS = {
   // registry_urls: ecosystem -> URL template for the lock-age lookup (a mirror; "" = no registry).
   security: { gitleaks: true, audit: true, registry_urls: {} as Record<string, string> },
   hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40, block_bypass: true },
+  // Every test run the gate starts waits while the 1-minute load is above max_load (0 = no wait). The
+  // default is 2 x CPUs: a shared machine idles near its CPU count, a second heavy run still waits.
+  // touched_cmd: coverage of `check --tests`; mutant_cmd: the tests of `mutant`. {files} = the test list.
+  tests: { touched_cmd: "", mutant_cmd: "", max_load: 2 * availableParallelism(), load_wait_s: 600, touched_timeout_s: 900, mutant_timeout_s: 300 },
   // Jev notes never block. Thresholds are advisory and can be tuned per repo.
   review: {
     jev: false,
@@ -99,10 +104,26 @@ const FLAGS = {
   since: { type: "string" },
   all: { type: "boolean", default: false },
   "if-configured": { type: "boolean", default: false },
+  tests: { type: "boolean", default: false },
+  test: { type: "string", multiple: true },
+  file: { type: "string" },
+  find: { type: "string" },
+  replace: { type: "string" },
 } as const;
 
 export function readArgs(argv = process.argv.slice(2)) {
-  return parseArgs({ args: argv, options: FLAGS, allowPositionals: true });
+  const args = parseArgs({ args: argv, options: FLAGS, allowPositionals: true });
+  laneArgs(argv, args.positionals[0] ?? "", args.values);
+  return args;
+}
+
+// check --tests judges one change: exactly one --since. mutant takes repeatable --test; --tests is check's.
+function laneArgs(argv: string[], cmd: string, v: Record<string, unknown>) {
+  if (cmd === "mutant" && v.tests) throw new Error("mutant takes --test <path> (repeatable), not --tests");
+  if (cmd !== "mutant" && v.test) throw new Error("--test is a mutant flag; check takes --tests");
+  if (cmd !== "check" || !v.tests) return;
+  const since = argv.filter((word) => word === "--since" || word.startsWith("--since=")).length;
+  if (since !== 1 || v.staged || v.all) throw new Error("check --tests needs exactly one --since <rev> and no --staged or --all");
 }
 
 export type Args = ReturnType<typeof readArgs>;
@@ -119,6 +140,19 @@ function validate(t: Record<string, any>, file: string) {
   validateToolOverrides(t.tools, file);
   validateRegistryUrls(t.security?.registry_urls, file);
   validateLanguages(t.project?.language, file);
+  validateTests(t.tests, file);
+}
+
+function validateTests(tests: Record<string, unknown> | undefined, file: string) {
+  if (!tests) return;
+  for (const key of ["touched_cmd", "mutant_cmd"]) {
+    const cmd = tests[key];
+    if (cmd !== undefined && (typeof cmd !== "string" || (cmd && !cmd.includes("{files}")))) throw new Error(`${file}: [tests] ${key} must be a command with {files} (the test list)`);
+  }
+  const bad = (key: string, ok: (n: number) => boolean) => key in tests && !(typeof tests[key] === "number" && ok(tests[key] as number));
+  if (bad("max_load", (n) => Number.isFinite(n) && n >= 0)) throw new Error(`${file}: [tests] max_load must be a finite number >= 0 (0 = no wait)`);
+  if (bad("load_wait_s", (n) => Number.isInteger(n) && n >= 0)) throw new Error(`${file}: [tests] load_wait_s must be an integer >= 0`);
+  for (const key of ["touched_timeout_s", "mutant_timeout_s"]) if (bad(key, (n) => Number.isFinite(n) && n > 0)) throw new Error(`${file}: [tests] ${key} must be a number > 0`);
 }
 
 function validateLanguages(value: unknown, file: string) {
