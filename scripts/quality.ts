@@ -5,6 +5,7 @@
 //   quality.ts [flags]                    full gate: tests with coverage + every check (minutes)
 //   quality.ts check [--staged|--since R|--all]   deterministic gate on the change (seconds)
 //   quality.ts check --since R --tests    acceptance: the change's touched tests with coverage, then the gate
+//   quality.ts mutant --file F --find T --replace T [--test P]...   one exact mutation against its tests
 //   quality.ts hook pre-commit|commit-msg <file>|pre-push   called by git-hooks/*
 //   quality.ts install-hooks <repo> | uninstall-hooks <repo>
 //   quality.ts install-grok-hooks | uninstall-grok-hooks
@@ -13,6 +14,7 @@ import { type Args, buildOpts, readArgs, repoConfigFile } from "./lib/config.ts"
 import { type Coverage, runFullTests } from "./lib/crap.ts";
 import { analyze, gate, writeBaseline } from "./lib/gate.ts";
 import { agentStop, installHooks, runCheck, runHook, uninstallHooks, updatePluginRoot } from "./lib/hooks.ts";
+import { mutantCmd } from "./lib/mutant.ts";
 import { guardBash } from "./lib/guard-bash.ts";
 import { installGrokHooks, uninstallGrokHooks } from "./lib/grok-hooks.ts";
 import { checkNotices, churn, failCount, testsLine, verdictText, worklist, writeReport } from "./lib/report.ts";
@@ -53,6 +55,7 @@ const COMMANDS: Record<string, (a: Args) => void | Promise<void>> = {
   check: checkCmd,
   hook: runHook,
   "agent-stop": agentStop,
+  mutant: mutantCmd,
   "guard-bash": guardBash,
   "install-hooks": (a) => installHooks(a.positionals[1]),
   "uninstall-hooks": (a) => uninstallHooks(a.positionals[1]),
