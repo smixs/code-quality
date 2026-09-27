@@ -88,6 +88,44 @@ describe("acceptance selection is the closure", () => {
   });
 });
 
+// Version 2: package.json#imports (Iva shape), paths precedence as in TypeScript, exports as a string.
+describe("resolution, version 2", () => {
+  const repo = nodeRepo({
+    "package.json": '{ "name": "iva", "type": "module", "imports": { "#*": "./agent/*", "#evals/*": "./evals/*" } }\n',
+    "agent/lib/x.ts": "export const x = 1;\n",
+    "lib/x.ts": "export const x = 2;\n",
+    "evals/a.ts": "export const a = 1;\n",
+    "agent/evals/a.ts": "export const a = 2;\n",
+    "scripts/x.test.ts": 'import { x } from "#lib/x.ts";\nx;\n',
+    "scripts/evals.test.ts": 'import { a } from "#evals/a.ts";\na;\n',
+    "tsconfig.json": '{ "compilerOptions": { "paths": { "@/*": ["fallback/*"], "@/feature/*": ["src/feature/*"] } } }\n',
+    "src/feature/x.ts": "export const fx = 1;\n",
+    "fallback/feature/x.ts": "export const fx = 2;\n",
+    "scripts/feature.test.ts": 'import { fx } from "@/feature/x";\nfx;\n',
+    "packages/vault-dir/package.json": '{ "name": "@iva/vault-dir", "type": "module", "exports": "./index.ts" }\n',
+    "packages/vault-dir/index.ts": "export const vaultDir = () => 1;\n",
+    "scripts/vault-dir.test.ts": 'import { vaultDir } from "@iva/vault-dir";\nvaultDir();\n',
+  }, "", false);
+  write(repo, ".quality.toml", TOML.replace('src = ["src"]', 'src = ["agent", "evals", "lib", "src", "fallback", "packages"]'));
+  commit(repo, "config");
+
+  test("imports: #lib/x.ts goes through \"#*\" to agent/lib/x.ts; the root decoy lib/x.ts selects nothing", () => {
+    expect([accept(repo, "agent/lib/x.ts").tests, accept(repo, "lib/x.ts").tests]).toEqual([["scripts/x.test.ts"], []]);
+  });
+
+  test("imports: #evals/a.ts takes the longer prefix \"#evals/*\", not \"#*\"", () => {
+    expect([accept(repo, "evals/a.ts").tests, accept(repo, "agent/evals/a.ts").tests]).toEqual([["scripts/evals.test.ts"], []]);
+  });
+
+  test("paths: @/feature/x takes the longer prefix @/feature/*; no edge to fallback/feature/x", () => {
+    expect([accept(repo, "src/feature/x.ts").tests, accept(repo, "fallback/feature/x.ts").tests]).toEqual([["scripts/feature.test.ts"], []]);
+  });
+
+  test("exports as a string is the root entry (Iva packages/vault-dir)", () => {
+    expect(accept(repo, "packages/vault-dir/index.ts").tests).toEqual(["scripts/vault-dir.test.ts"]);
+  });
+});
+
 describe("pre-push keeps names and direct imports, capped", () => {
   test("hook pre-push on the same repo: the named test and the direct importer, capped at pre_push_max_tests", () => {
     const run = (max: number) => {

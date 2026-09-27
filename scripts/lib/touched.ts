@@ -95,36 +95,74 @@ function pathLiterals(repo: string, test: string, text: string, tracked: Set<str
 type Alias = { pattern: string; target: string };
 type Package = { name: string; dir: string; entry: string };
 
-// A module specifier -> the repo files it names: a relative path; the paths of the nearest tsconfig.json
-// at or above the file's folder (through relative extends); a workspace package by name or name/sub.
+// A module specifier -> the repo files it names: a relative path; `#…` through the imports of the nearest
+// package.json at or above the file's folder; the paths of the nearest tsconfig.json (through relative
+// extends); a workspace package by name or name/sub. A key decides as in TypeScript and Node (aliasTargets).
 // Extensions and /index as for a relative import; anything else is external.
 function moduleResolver(repo: string, tracked: string[], nodes: string[]) {
   const byModule = new Map<string, string[]>();
   for (const file of nodes) byModule.set(stripModuleExt(file), [...(byModule.get(stripModuleExt(file)) ?? []), file]);
   const lookup = (path: string) => (path ? [...(byModule.get(stripModuleExt(normalize(path))) ?? []), ...(byModule.get(`${stripModuleExt(normalize(path))}/index`) ?? [])] : []);
-  const configs = new Set(tracked.filter((file) => basename(file) === "tsconfig.json"));
-  const aliasesOf = new Map<string, Alias[]>();
-  const aliasesFor = (dir: string): Alias[] => {
-    if (!aliasesOf.has(dir)) {
-      const config = dir === "." ? "tsconfig.json" : `${dir}/tsconfig.json`;
-      aliasesOf.set(dir, configs.has(config) ? inheritedAliases(repo, config) : dir === "." ? [] : aliasesFor(dirname(dir)));
-    }
-    return aliasesOf.get(dir)!;
+  const firstHit = (targets: string[]) => targets.map(lookup).find((hit) => hit.length) ?? [];
+  const trackedSet = new Set(tracked);
+  // The aliases of the nearest `name` at or above a folder, read once per folder.
+  const nearest = (name: string, read: (file: string) => Alias[]) => {
+    const byDir = new Map<string, Alias[]>();
+    const walk = (dir: string): Alias[] => {
+      if (!byDir.has(dir)) {
+        const file = dir === "." ? name : `${dir}/${name}`;
+        byDir.set(dir, trackedSet.has(file) ? read(file) : dir === "." ? [] : walk(dirname(dir)));
+      }
+      return byDir.get(dir)!;
+    };
+    return walk;
   };
+  const aliasesFor = nearest("tsconfig.json", (file) => inheritedAliases(repo, file));
+  const importsFor = nearest("package.json", (file) => packageImports(repo, file));
   const packages = workspacePackages(repo, tracked);
   return (from: string, spec: string): string[] => {
     if (spec.startsWith(".")) return lookup(join(dirname(from), spec));
-    for (const alias of aliasesFor(dirname(from))) {
-      const hit = lookup(expandAlias(alias, spec));
-      if (hit.length) return hit;
-    }
+    if (spec.startsWith("#")) return firstHit(aliasTargets(importsFor(dirname(from)), spec));
+    const hit = firstHit(aliasTargets(aliasesFor(dirname(from)), spec));
+    if (hit.length) return hit;
     const pkg = packages.find((p) => spec === p.name || spec.startsWith(`${p.name}/`));
     if (!pkg) return [];
     if (spec === pkg.name) return lookup(join(pkg.dir, pkg.entry));
     const sub = spec.slice(pkg.name.length + 1);
-    const hit = lookup(join(pkg.dir, sub));
-    return hit.length ? hit : lookup(join(pkg.dir, "src", sub));
+    return firstHit([join(pkg.dir, sub), join(pkg.dir, "src", sub)]);
   };
+}
+
+// The key that decides a specifier: an exact key, else the `*` pattern with the longest prefix before
+// `*`; only that key's targets, in their order. Declaration order does not decide.
+function aliasTargets(aliases: Alias[], spec: string) {
+  const exact = aliases.filter((alias) => alias.pattern === spec);
+  if (exact.length) return exact.map((alias) => alias.target);
+  const matching = aliases.filter((alias) => alias.pattern.includes("*") && expandAlias(alias, spec));
+  const longest = Math.max(-1, ...matching.map((alias) => alias.pattern.indexOf("*")));
+  const key = matching.find((alias) => alias.pattern.indexOf("*") === longest)?.pattern;
+  return matching.filter((alias) => alias.pattern === key).map((alias) => expandAlias(alias, spec));
+}
+
+// package.json#imports: "#key": a string, or the import / default of a condition object; targets from
+// that package.json's folder.
+function packageImports(repo: string, file: string): Alias[] {
+  const imports = parseJson(readText(join(repo, file)))?.imports;
+  if (!imports || typeof imports !== "object") return [];
+  return Object.entries(imports as Record<string, unknown>).flatMap(([pattern, value]) => {
+    const target = typeof value === "string" ? value : ((value as Conditions | null)?.import ?? (value as Conditions | null)?.default);
+    return typeof target === "string" ? [{ pattern, target: normalize(join(dirname(file), target)) }] : [];
+  });
+}
+
+type Conditions = { import?: unknown; default?: unknown };
+
+function parseJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 // The paths a tsconfig declares, else the ones its relative extends chain declares.
@@ -149,19 +187,17 @@ function declaredAliases(repo: string, config: string): Alias[] | null {
   return [...body.matchAll(/["']([^"']+)["']\s*:\s*\[([^\]]*)\]/g)].flatMap((match) => [...match[2].matchAll(/["']([^"']+)["']/g)].map((target) => ({ pattern: match[1], target: normalize(join(base, target[1])) })));
 }
 
-// Tracked package.json files outside node_modules with a name; the bare name goes to exports["."]
-// (a string, or its import / default), else module, else main, else src/index. Longest name first.
+// Tracked package.json files outside node_modules with a name; the bare name goes to exports as a string
+// or exports["."] (a string, or its import / default), else module, else main, else src/index. Longest
+// name first.
 function workspacePackages(repo: string, tracked: string[]): Package[] {
   return tracked.filter((file) => basename(file) === "package.json" && !/(^|\/)node_modules\//.test(file)).flatMap((file) => {
-    try {
-      const pkg = JSON.parse(readText(join(repo, file)));
-      const dot = pkg.exports?.["."];
-      const exported = typeof dot === "string" ? dot : (dot?.import ?? dot?.default);
-      const entry = [exported, pkg.module, pkg.main].find((value) => typeof value === "string") ?? "src/index";
-      return typeof pkg.name === "string" && pkg.name ? [{ name: pkg.name, dir: dirname(file), entry }] : [];
-    } catch {
-      return [];
-    }
+    const pkg = parseJson(readText(join(repo, file)));
+    if (typeof pkg?.name !== "string" || !pkg.name) return [];
+    const dot = typeof pkg.exports === "string" ? pkg.exports : pkg.exports?.["."];
+    const exported = typeof dot === "string" ? dot : (dot?.import ?? dot?.default);
+    const entry = [exported, pkg.module, pkg.main].find((value) => typeof value === "string") ?? "src/index";
+    return [{ name: pkg.name, dir: dirname(file), entry }];
   }).sort((a, b) => b.name.length - a.name.length);
 }
 
