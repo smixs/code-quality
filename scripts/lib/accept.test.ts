@@ -34,7 +34,7 @@ describe("check --since <rev> --tests", () => {
     const repo = changedRepo();
     const r = checkTests(repo);
     expect(r.stdout).toMatch(/^tests: 1 touched test file\(s\) pass in [\d.]+s, coverage fresh \(touched\)$/m);
-    expect(r.stdout).toContain("touched tests: 1 by name, 0 by direct import, 0 by second-hop import");
+    expect(r.stdout).toContain("touched tests: 1 by name, 0 by direct import, 0 further");
     expect(read(repo, `${OUT}/check.md`)).toContain("- 2.0 cc 2 cov 100% src/calc.ts:1-4 Function 'add'");
     expect([r.status, runDirs(repo), existsSync(join(repo, OUT, "lcov.info"))]).toEqual([0, [], false]);
   }, 60_000);
@@ -178,7 +178,7 @@ describe("check --since <rev> --tests", () => {
     const without = changedRepo([ADD_TEST, NEG_TEST]);
     write(without, ".quality.toml", read(without, ".quality.toml").replace('base = "HEAD"', 'base = "HEAD"\ntest_cmd = "true"'));
     const adapter = checkTests(without);
-    expect([adapter.status, adapter.stdout.includes("note: tests/touched: project.test_cmd has no {files}"), adapter.stdout.includes("note: tests/touched command: node --test")]).toEqual([0, true, true]);
+    expect([adapter.status, adapter.stdout.includes("note: tests/touched: project.test_cmd has no {files}"), adapter.stdout.includes('note: tests/touched command: rm -f "$QG_DIR/node.lcov"; node --test')]).toEqual([0, true, true]);
     const bad = changedRepo([ADD_TEST], "touched_cmd = 'node --test'");
     expect([checkTests(bad).status, checkTests(bad).stderr.includes("[tests] touched_cmd must be a command with {files}")]).toEqual([2, true]);
   }, 90_000);
@@ -223,7 +223,7 @@ describe("check --since <rev> --tests", () => {
     expect([r.status, r.stderr.startsWith("code-quality: ")]).toEqual([2, true]);
   }, 60_000);
 
-  test("second-hop selection: test -> *.render-harness.tsx -> component", () => {
+  test("closure selection: test -> *.render-harness.tsx -> component", () => {
     const repo = nodeRepo({
       "src/button.tsx": "export const label = (x: string) => x;\n",
       "src/button.render-harness.tsx": 'import { label } from "./button.tsx";\nexport const render = () => label("a");\n',
@@ -232,20 +232,20 @@ describe("check --since <rev> --tests", () => {
     write(repo, "src/button.tsx", "export const label = (x: string) => `${x}!`;\n");
     commit(repo);
     const r = checkTests(repo);
-    expect([r.status, r.stdout.includes("touched tests: 0 by name, 0 by direct import, 1 by second-hop import")]).toEqual([0, true]);
+    expect([r.status, r.stdout.includes("touched tests: 0 by name, 0 by direct import, 1 further")]).toEqual([0, true]);
   }, 60_000);
 
-  test("second-hop selection ignores intermediates in node_modules and re-exports", () => {
+  test("the closure ignores files in node_modules; a re-export counts (1.3.2)", () => {
     const cases = [
-      { "node_modules/kit/harness.ts": 'import { label } from "../../src/button.tsx";\nexport const render = () => label("a");\n', "src/view.test.ts": 'import { render } from "../node_modules/kit/harness.ts";\nrender();\n' },
-      { "src/barrel.ts": 'export { label } from "./button.tsx";\n', "src/view.test.ts": 'import { label } from "./barrel.ts";\nlabel("a");\n' },
+      { files: { "node_modules/kit/harness.ts": 'import { label } from "../../src/button.tsx";\nexport const render = () => label("a");\n', "src/view.test.ts": 'import { render } from "../node_modules/kit/harness.ts";\nrender();\n' }, status: 1, further: 0 },
+      { files: { "src/barrel.ts": 'export { label } from "./button.tsx";\n', "src/view.test.ts": 'import { label } from "./barrel.ts";\nlabel("a");\n' }, status: 0, further: 1 },
     ];
-    for (const files of cases) {
+    for (const { files, status, further } of cases) {
       const repo = nodeRepo({ "src/button.tsx": "export const label = (x: string) => x;\n", ...files }, `touched_cmd = '''printf '${lcovOf("src/button.tsx", [1])}' > "$QG_LCOV"; : {files}'''`);
       write(repo, "src/button.tsx", "export const label = (x: string) => `${x}!`;\n");
       commit(repo);
       const r = checkTests(repo);
-      expect([r.status, r.stdout.includes("touched tests: 0 by name, 0 by direct import, 0 by second-hop import")]).toEqual([1, true]);
+      expect([r.status, r.stdout.includes(`touched tests: 0 by name, 0 by direct import, ${further} further`)]).toEqual([status, true]);
     }
   }, 60_000);
 
@@ -284,13 +284,13 @@ describe("selection of render tests (sotish admin shape)", () => {
   test("names: X.render.test.ts beside X.tsx is a named test of X.tsx", () => {
     const repo = nodeRepo({ "src/ThemePanel.tsx": SCREEN, "src/ThemePanel.render.test.ts": 'import { test } from "node:test";\ntest("renders", () => {});\n' }, fakeLcov("src/ThemePanel.tsx"));
     const r = change(repo, "src/ThemePanel.tsx");
-    expect([r.status, counts(r)]).toEqual([0, "touched tests: 1 by name, 0 by direct import, 0 by second-hop import"]);
+    expect([r.status, counts(r)]).toEqual([0, "touched tests: 1 by name, 0 by direct import, 0 further"]);
   }, 60_000);
 
   test("literals: a test passing the harness path as a string reaches the screen the harness imports", () => {
     const repo = nodeRepo({ "src/ThemePanel.tsx": SCREEN, "src/ThemePanel.render-harness.tsx": HARNESS, "src/run-harness.ts": "export const runHarness = (path: string) => path;\n", "src/panel-screen.test.ts": RENDER_TEST("ThemePanel.render-harness.tsx") }, fakeLcov("src/ThemePanel.tsx"));
     const r = change(repo, "src/ThemePanel.tsx");
-    expect([r.status, counts(r)]).toEqual([0, "touched tests: 0 by name, 0 by direct import, 1 by second-hop import"]);
+    expect([r.status, counts(r)]).toEqual([0, "touched tests: 0 by name, 0 by direct import, 1 further"]);
   }, 60_000);
 
   test("literals: strings that name no tracked file (a word, a URL, a missing path, an untracked file) select nothing and crash nothing", () => {
@@ -300,10 +300,10 @@ describe("selection of render tests (sotish admin shape)", () => {
     write(repo, "src/untracked.tsx", SCREEN);
     write(repo, ".gitignore", ".scratch/\nsrc/untracked.tsx\n");
     const r = change(repo, "src/ThemePanel.tsx");
-    expect([r.status, counts(r), r.stdout.includes("tamper/no-tests-ran"), r.stderr]).toEqual([1, "touched tests: 0 by name, 0 by direct import, 0 by second-hop import", true, ""]);
+    expect([r.status, counts(r), r.stdout.includes("tamper/no-tests-ran"), r.stderr]).toEqual([1, "touched tests: 0 by name, 0 by direct import, 0 further", true, ""]);
   }, 60_000);
 
-  test("depth: a component three steps away (test -> harness -> screen -> component) is not selected", () => {
+  test("closure: a component three steps away (test -> harness -> screen -> component) is selected (1.3.2)", () => {
     const repo = nodeRepo({
       "src/Badge.tsx": "export const Badge = (x: string) => x;\n",
       "src/ThemePanel.tsx": 'import { Badge } from "./Badge.tsx";\nexport const ThemePanel = (x: string) => Badge(x);\n',
@@ -312,7 +312,7 @@ describe("selection of render tests (sotish admin shape)", () => {
       "src/panel-screen.test.ts": RENDER_TEST("ThemePanel.render-harness.tsx"),
     }, fakeLcov("src/Badge.tsx"));
     const r = change(repo, "src/Badge.tsx");
-    expect([r.status, counts(r)]).toEqual([1, "touched tests: 0 by name, 0 by direct import, 0 by second-hop import"]);
+    expect([r.status, counts(r)]).toEqual([0, "touched tests: 0 by name, 0 by direct import, 1 further"]);
   }, 60_000);
 
   test("pre-push selection is unchanged: no stem names, no path literals", () => {

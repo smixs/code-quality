@@ -11,26 +11,26 @@ export function touchedTests(o: Opts, files: string[]) {
   return touchedTestSelection(o, files).tests;
 }
 
-// Pre-push: its cap, <stem>.test names and direct imports. check --tests and mutant: every test; depth 2
-// also counts a test that reaches the source through one intermediate repo file (test -> harness or
-// module -> source); stemNames counts <stem>.<anything>.test.<ext> beside the source; pathLiterals
-// counts a quoted path in a test that names a tracked file. A source three steps away (test -> harness
-// -> screen -> component) stays unselected; the project's full run covers it.
-export type SelectionOptions = { maxTests: number; depth: 1 | 2; stemNames: boolean; pathLiterals: boolean };
-export const ACCEPTANCE: SelectionOptions = { maxTests: Infinity, depth: 2, stemNames: true, pathLiterals: true };
-const prePushSelection = (o: Opts): SelectionOptions => ({ maxTests: Number(o.toml.hooks.pre_push_max_tests), depth: 1, stemNames: false, pathLiterals: false });
+// Pre-push: its cap, <stem>.test names and direct imports (root tsconfig paths). check --tests and
+// mutant (closure): every test, <stem>.<anything>.test.<ext> beside the source counts as named, and a
+// test that reaches the source through any chain of imports, re-exports, dynamic imports, require and
+// test path literals is selected; modules resolve as the project resolves them (resolveModule).
+export type SelectionOptions = { maxTests: number; closure: boolean };
+export const ACCEPTANCE: SelectionOptions = { maxTests: Infinity, closure: true };
+const prePushSelection = (o: Opts): SelectionOptions => ({ maxTests: Number(o.toml.hooks.pre_push_max_tests), closure: false });
 
 export function touchedTestSelection(o: Opts, files: string[], options: SelectionOptions = prePushSelection(o)) {
-  const named = existingNamedTests(o, files, options.stemNames);
-  const imports = importingTests(o, files, options);
+  const named = existingNamedTests(o, files, options.closure);
+  const sources = files.filter((file) => isProjectSource(o, file) && adapterForFile(o.langs, file)?.id === "ts");
+  const imports = options.closure ? reachingTests(o, sources) : { direct: directTests(o, sources), further: [] };
   const direct = imports.direct.filter((file) => !named.includes(file));
-  const hop = imports.secondHop.filter((file) => !named.includes(file) && !direct.includes(file));
+  const reached = imports.further.filter((file) => !named.includes(file) && !direct.includes(file));
   const max = Math.max(0, Math.floor(options.maxTests));
   const byName = named.slice(0, max);
   const byImport = direct.slice(0, Math.max(0, max - byName.length));
-  const bySecondHop = hop.slice(0, Math.max(0, max - byName.length - byImport.length));
-  const omitted = named.length + direct.length + hop.length - byName.length - byImport.length - bySecondHop.length;
-  return { tests: [...byName, ...byImport, ...bySecondHop], byName: byName.length, byImport: byImport.length, bySecondHop: bySecondHop.length, omitted, max };
+  const further = reached.slice(0, Math.max(0, max - byName.length - byImport.length));
+  const omitted = named.length + direct.length + reached.length - byName.length - byImport.length - further.length;
+  return { tests: [...byName, ...byImport, ...further], byName: byName.length, byImport: byImport.length, further: further.length, omitted, max };
 }
 
 function existingNamedTests(o: Opts, files: string[], stemNames: boolean) {
@@ -47,37 +47,42 @@ function stemTests(o: Opts, file: string) {
   return readdirSync(join(o.repo, dir)).filter((entry) => entry.startsWith(`${stem}.`)).map((entry) => (dir === "." ? entry : `${dir}/${entry}`)).filter((test) => isTestFile(o.langs, test));
 }
 
-function importingTests(o: Opts, files: string[], options: SelectionOptions) {
-  const sources = files.filter((file) => isProjectSource(o, file) && adapterForFile(o.langs, file)?.id === "ts");
-  if (!sources.length) return { direct: [], secondHop: [] };
-  const aliases = tsAliases(o.repo);
-  const tracked = lines(gitPaths(o.repo, "ls-files"));
-  const tsFiles = tracked.filter((file) => adapterForFile(o.langs, file)?.id === "ts").sort();
-  const tests = tsFiles.filter((file) => isTestFile(o.langs, file));
-  const testRules: ImportRules = { reexports: true, literals: options.pathLiterals ? new Set(tracked) : null };
-  const direct = tests.filter((test) => fileImports(o.repo, test, sources, aliases, testRules));
-  if (options.depth < 2) return { direct, secondHop: [] };
-  // Intermediates: repo TS files outside node_modules that import the source; a re-export is no import.
-  const middles = tsFiles.filter((file) => !sources.includes(file) && !/(^|\/)node_modules\//.test(file) && fileImports(o.repo, file, sources, aliases, { reexports: false, literals: null }));
-  const secondHop = tests.filter((test) => !direct.includes(test) && fileImports(o.repo, test, middles.filter((file) => file !== test), aliases, testRules));
-  return { direct, secondHop };
+const MODULE = /(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g;
+const readText = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+
+// pre-push: tests that import a source directly, aliases from the root tsconfig.json only.
+function directTests(o: Opts, sources: string[]) {
+  if (!sources.length) return [];
+  const aliases = declaredAliases(o.repo, "tsconfig.json") ?? [];
+  const tests = lines(gitPaths(o.repo, "ls-files")).filter((file) => adapterForFile(o.langs, file)?.id === "ts" && isTestFile(o.langs, file)).sort();
+  return tests.filter((test) => [...readText(join(o.repo, test)).matchAll(MODULE)].some((m) => sources.some((source) => importTargets(test, m[1], source, aliases))));
 }
 
-type Alias = { pattern: string; target: string };
-
-const REEXPORT = /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s*["'`][^"'`]+["'`]/g;
-
-// reexports: export ... from counts as an import; literals: the tracked files a quoted path may name
-// (tests only), null = strings are not imports.
-type ImportRules = { reexports: boolean; literals: Set<string> | null };
-
-function fileImports(repo: string, test: string, sources: string[], aliases: Alias[], rules: ImportRules = { reexports: true, literals: null }) {
-  const path = join(repo, test);
-  if (!existsSync(path)) return false;
-  const text = readFileSync(path, "utf8");
-  if (rules.literals && pathLiterals(repo, test, text, rules.literals).some((file) => sources.includes(file))) return true;
-  const modules = [...(rules.reexports ? text : text.replace(REEXPORT, "")).matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
-  return modules.some((module) => sources.some((source) => importTargets(test, module, source, aliases)));
+// The closure: one reverse graph of the repo's TS files (outside node_modules), walked from the sources.
+function reachingTests(o: Opts, sources: string[]) {
+  if (!sources.length) return { direct: [], further: [] };
+  const tracked = lines(gitPaths(o.repo, "ls-files"));
+  const trackedSet = new Set(tracked);
+  const nodes = tracked.filter((file) => adapterForFile(o.langs, file)?.id === "ts" && !/(^|\/)node_modules\//.test(file) && existsSync(join(o.repo, file))).sort();
+  const resolve = moduleResolver(o.repo, tracked, nodes);
+  const importers = new Map<string, Set<string>>();
+  for (const file of nodes) {
+    const text = readFileSync(join(o.repo, file), "utf8");
+    const specs = [...text.matchAll(MODULE)].flatMap((m) => resolve(file, m[1]));
+    const literals = isTestFile(o.langs, file) ? pathLiterals(o.repo, file, text, trackedSet) : [];
+    for (const target of [...specs, ...literals]) importers.set(target, (importers.get(target) ?? new Set()).add(file));
+  }
+  const direct = nodes.filter((file) => isTestFile(o.langs, file) && sources.some((source) => importers.get(source)?.has(file)));
+  const seen = new Set(sources);
+  for (const queue = [...sources]; queue.length; ) {
+    for (const file of importers.get(queue.pop()!) ?? []) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      queue.push(file);
+    }
+  }
+  const further = [...seen].filter((file) => isTestFile(o.langs, file) && !direct.includes(file)).sort();
+  return { direct, further };
 }
 
 // A quoted string in a test that resolves from the test's folder to an existing tracked file:
@@ -85,6 +90,79 @@ function fileImports(repo: string, test: string, sources: string[], aliases: Ali
 function pathLiterals(repo: string, test: string, text: string, tracked: Set<string>) {
   const strings = [...text.matchAll(/"([^"\n]+)"|'([^'\n]+)'|`([^`$\n]+)`/g)].map((match) => match[1] ?? match[2] ?? match[3]);
   return strings.map((value) => normalize(join(dirname(test), value))).filter((file) => tracked.has(file) && existsSync(join(repo, file)));
+}
+
+type Alias = { pattern: string; target: string };
+type Package = { name: string; dir: string; entry: string };
+
+// A module specifier -> the repo files it names: a relative path; the paths of the nearest tsconfig.json
+// at or above the file's folder (through relative extends); a workspace package by name or name/sub.
+// Extensions and /index as for a relative import; anything else is external.
+function moduleResolver(repo: string, tracked: string[], nodes: string[]) {
+  const byModule = new Map<string, string[]>();
+  for (const file of nodes) byModule.set(stripModuleExt(file), [...(byModule.get(stripModuleExt(file)) ?? []), file]);
+  const lookup = (path: string) => (path ? [...(byModule.get(stripModuleExt(normalize(path))) ?? []), ...(byModule.get(`${stripModuleExt(normalize(path))}/index`) ?? [])] : []);
+  const configs = new Set(tracked.filter((file) => basename(file) === "tsconfig.json"));
+  const aliasesOf = new Map<string, Alias[]>();
+  const aliasesFor = (dir: string): Alias[] => {
+    if (!aliasesOf.has(dir)) {
+      const config = dir === "." ? "tsconfig.json" : `${dir}/tsconfig.json`;
+      aliasesOf.set(dir, configs.has(config) ? inheritedAliases(repo, config) : dir === "." ? [] : aliasesFor(dirname(dir)));
+    }
+    return aliasesOf.get(dir)!;
+  };
+  const packages = workspacePackages(repo, tracked);
+  return (from: string, spec: string): string[] => {
+    if (spec.startsWith(".")) return lookup(join(dirname(from), spec));
+    for (const alias of aliasesFor(dirname(from))) {
+      const hit = lookup(expandAlias(alias, spec));
+      if (hit.length) return hit;
+    }
+    const pkg = packages.find((p) => spec === p.name || spec.startsWith(`${p.name}/`));
+    if (!pkg) return [];
+    if (spec === pkg.name) return lookup(join(pkg.dir, pkg.entry));
+    const sub = spec.slice(pkg.name.length + 1);
+    const hit = lookup(join(pkg.dir, sub));
+    return hit.length ? hit : lookup(join(pkg.dir, "src", sub));
+  };
+}
+
+// The paths a tsconfig declares, else the ones its relative extends chain declares.
+function inheritedAliases(repo: string, config: string): Alias[] {
+  const seen = new Set<string>();
+  for (let file = config; file && !file.startsWith("..") && !seen.has(file); ) {
+    seen.add(file);
+    const own = declaredAliases(repo, file);
+    if (own) return own;
+    const parent = /["']extends["']\s*:\s*["'](\.[^"']+)["']/.exec(readText(join(repo, file)))?.[1];
+    file = parent ? normalize(join(dirname(file), parent.endsWith(".json") ? parent : `${parent}.json`)) : "";
+  }
+  return [];
+}
+
+// null = the config declares no paths. Targets resolve against its baseUrl, else its own folder.
+function declaredAliases(repo: string, config: string): Alias[] | null {
+  const text = readText(join(repo, config));
+  const body = /["']paths["']\s*:\s*\{([^}]*)\}/.exec(text)?.[1];
+  if (body === undefined) return null;
+  const base = join(dirname(config), /["']baseUrl["']\s*:\s*["']([^"']+)["']/.exec(text)?.[1] ?? ".");
+  return [...body.matchAll(/["']([^"']+)["']\s*:\s*\[([^\]]*)\]/g)].flatMap((match) => [...match[2].matchAll(/["']([^"']+)["']/g)].map((target) => ({ pattern: match[1], target: normalize(join(base, target[1])) })));
+}
+
+// Tracked package.json files outside node_modules with a name; the bare name goes to exports["."]
+// (a string, or its import / default), else module, else main, else src/index. Longest name first.
+function workspacePackages(repo: string, tracked: string[]): Package[] {
+  return tracked.filter((file) => basename(file) === "package.json" && !/(^|\/)node_modules\//.test(file)).flatMap((file) => {
+    try {
+      const pkg = JSON.parse(readText(join(repo, file)));
+      const dot = pkg.exports?.["."];
+      const exported = typeof dot === "string" ? dot : (dot?.import ?? dot?.default);
+      const entry = [exported, pkg.module, pkg.main].find((value) => typeof value === "string") ?? "src/index";
+      return typeof pkg.name === "string" && pkg.name ? [{ name: pkg.name, dir: dirname(file), entry }] : [];
+    } catch {
+      return [];
+    }
+  }).sort((a, b) => b.name.length - a.name.length);
 }
 
 function importTargets(test: string, module: string, source: string, aliases: Alias[]) {
@@ -108,15 +186,6 @@ function expandAlias(alias: Alias, module: string) {
   const suffix = alias.pattern.slice(star + 1);
   if (!module.startsWith(prefix) || !module.endsWith(suffix)) return "";
   return alias.target.replace("*", module.slice(prefix.length, module.length - suffix.length));
-}
-
-function tsAliases(repo: string): Alias[] {
-  const path = join(repo, "tsconfig.json");
-  if (!existsSync(path)) return [];
-  const text = readFileSync(path, "utf8");
-  const body = /["']paths["']\s*:\s*\{([^}]*)\}/.exec(text)?.[1] ?? "";
-  const base = /["']baseUrl["']\s*:\s*["']([^"']+)["']/.exec(text)?.[1] ?? ".";
-  return [...body.matchAll(/["']([^"']+)["']\s*:\s*\[([^\]]*)\]/g)].flatMap((match) => [...match[2].matchAll(/["']([^"']+)["']/g)].map((target) => ({ pattern: match[1], target: normalize(join(base, target[1])) })));
 }
 
 // messages = the commit messages of the change; the first qg:no-test <reason> in them is the bypass.

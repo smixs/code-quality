@@ -24,7 +24,7 @@ export async function acceptanceTests(o: Opts): Promise<Lane | null> {
   if (isDocsOnly(o, ch)) return null;
   const files = [...ch.keys()];
   const selection = touchedTestSelection(o, files, ACCEPTANCE);
-  const counts = `touched tests: ${selection.byName} by name, ${selection.byImport} by direct import, ${selection.bySecondHop} by second-hop import`;
+  const counts = `touched tests: ${selection.byName} by name, ${selection.byImport} by direct import, ${selection.further} further`;
   // qg:no-test in the commit messages of <rev>..HEAD: no tests run, complexity only, cov/diff not run.
   const noTest = noTestCheck(files.some((file) => isProjectSource(o, file)), selection.tests.length, commitMessages(o));
   if (!selection.tests.length) return { tests: NOT_RUN, lines: [counts, "tests: not run, no touched tests"], checks: [noTest], dir: "", failed: false };
