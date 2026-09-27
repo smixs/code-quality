@@ -169,6 +169,14 @@ describe("mutant arguments and target", () => {
     expect([r.status, r.stdout.includes("is neither the original nor the mutant; target and state kept"), read(repo, "src/calc.ts").endsWith("// third\n"), existsSync(join(repo, LOCK))]).toEqual([2, true, true, true]);
   }, 60_000);
 
+  test("a target whose realpath left the repo before the restore: nothing written, .orig, owner and lock kept, exit 2", () => {
+    const elsewhere = tmp();
+    const repo = calcRepo(secondRun(`mv src ${elsewhere}/src && ln -s ${elsewhere}/src src`));
+    const r = mutant(repo, ...KILLS);
+    const kept = ["calc.ts.orig", "owner.json"].map((file) => existsSync(join(repo, LOCK, file)));
+    expect([r.status, r.stdout.startsWith("MUTANT ERROR: "), readFileSync(join(elsewhere, "src/calc.ts"), "utf8"), ...kept]).toEqual([2, true, ADD_NEG.replace("a + b", "a - b"), true, true]);
+  }, 60_000);
+
   test("mutants.log that cannot be appended: MUTANT ERROR after the restore", () => {
     const repo = calcRepo();
     mkdirSync(join(repo, OUT, "mutants.log"), { recursive: true });

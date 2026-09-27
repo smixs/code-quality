@@ -326,6 +326,15 @@ function targetDrift(o: Opts, target: Target) {
   return regularSha(target.abs) === sha256(target.original) ? "" : `${target.rel} changed during the preflight; target and state kept`;
 }
 
+// Right before the restore: still a regular non-symlink file whose realpath is inside the repo.
+function restoreDrift(o: Opts, target: Target) {
+  try {
+    return regularInRepo(o, target.abs, target.rel) === target.rel ? "" : `${target.rel} moved during the run`;
+  } catch (e) {
+    return (e as Error).message;
+  }
+}
+
 function preflightProblem(o: Opts, plan: Plan, r: RunResult) {
   if (r.timedOut) return `timed out after ${o.toml.tests.mutant_timeout_s}s`;
   const counts = summary(plan, readText(r.log));
@@ -352,6 +361,8 @@ function finish(o: Opts, state: State, plan: Plan, fs: MutantFs, outcome: Step, 
   const stopped = signal();
   const result = stopped && !outcome.keep ? { code: stopped.code, line: `MUTANT ERROR: interrupted by ${stopped.name}, ${target.rel} restored`, failing: null } : outcome;
   if (outcome.keep) return appendLog(o, plan, result);
+  const moved = restoreDrift(o, target);
+  if (moved) return appendLog(o, plan, error(`${moved}; target and state kept, original at ${state.orig(target.rel)}`));
   const current = regularSha(target.abs);
   if (current !== sha256(target.original) && current !== sha256(target.mutant)) return appendLog(o, plan, error(`${target.rel} is neither the original nor the mutant; target and state kept, original at ${state.orig(target.rel)}`));
   if (current !== sha256(target.original) && !restoreBytes(target.abs, target.original, fs)) return appendLog(o, plan, error(`restore failed, original at ${state.orig(target.rel)}`));
