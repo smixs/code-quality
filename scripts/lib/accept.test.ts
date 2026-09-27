@@ -99,7 +99,7 @@ describe("check --since <rev> --tests", () => {
     const r = checkTests(repo);
     const pid = Number(read(repo, "sleep.pid"));
     await until(() => !alive(pid), 5_000);
-    expect([r.status, r.stdout.includes("tests/timeout after 1s")]).toEqual([1, true]);
+    expect([r.status, /^tests: 1 touched test file\(s\) timed out after 1s, process group killed; log \S+tests\.log$/m.test(r.stdout), /^tests\/timeout\s+\.:0\s+timed out after 1s/m.test(r.stdout)]).toEqual([1, true, true]);
   }, 60_000);
 
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {

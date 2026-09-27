@@ -40,7 +40,7 @@ export async function acceptanceTests(o: Opts): Promise<Lane | null> {
 function runVerdict(o: Opts, r: RunResult, t: Tests, count: number) {
   const files = `${count} touched test file(s)`;
   if (r.timedOut) {
-    const msg = `tests/timeout after ${o.toml.tests.touched_timeout_s}s, process group killed; log ${r.log}`;
+    const msg = `timed out after ${o.toml.tests.touched_timeout_s}s, process group killed; log ${r.log}`;
     return { line: `tests: ${files} ${msg}`, check: check("tests", [finding("tests/timeout", msg)]) };
   }
   if (r.code !== 0) {
