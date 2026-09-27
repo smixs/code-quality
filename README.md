@@ -14,7 +14,7 @@ A quality gate for coding agents: git hooks and Stop hooks that block test tampe
 <p>
   <a href="https://skills.sh/smixs/code-quality"><img src="https://skills.sh/b/smixs/code-quality?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
-  <a href="scripts/"><img src="https://img.shields.io/badge/tests-381_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="381 tests"></a>
+  <a href="scripts/"><img src="https://img.shields.io/badge/tests-395_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="395 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
   <a href="hooks/hooks.json"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
   <a href="adapters/pi.ts"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
@@ -42,7 +42,7 @@ A quality gate for coding agents: git hooks and Stop hooks that block test tampe
 
 ## What's new in 1.3
 
-- **Accept a change by its own tests.** `check --since <base> --tests` runs the tests the change touches, with coverage, and judges only the changed functions.
+- **Accept a change by its own tests.** `check --since <base> --tests` runs every test that reaches the change through the project's imports, with coverage, and judges only the changed functions.
 - **Prove a test catches a bug.** `mutant` makes one exact mutation, runs the tests and restores the file byte for byte, even after Ctrl-C.
 - **The gate judges the pushed commit.** When a push has touched tests to run, pre-push refuses a commit that is not the checked-out one.
 - **Calm on a shared machine.** Test runs wait for a busy machine, Ctrl-C kills the whole test group, and a copy run by hand no longer takes the machine's git hooks.

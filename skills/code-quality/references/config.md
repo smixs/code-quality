@@ -7,7 +7,7 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   (the ref for "the change"; empty by default = detected from `refs/remotes/origin/HEAD`, then
   `origin/main`, `origin/master`, `main`, and the report header marks a detected base with
   `(detected)`), `test_cmd` (the full gate; it must write lcov to `$QG_LCOV`, with `$QG_DIR` =
-  `out_dir`), `out_dir` (every report, the baseline, `allow.md`, the Stop markers, `jev-log.jsonl`;
+  `out_dir`; `$QG_LCOV` starts empty, and the command and the tests' child processes append to it), `out_dir` (every report, the baseline, `allow.md`, the Stop markers, `jev-log.jsonl`;
   default `.scratch/quality`), `tools_dir` (cache for the npm tools the gate installs itself;
   `QG_TOOLS` wins over it, the default is `~/.cache/quality-gate`, on Windows
   `%LOCALAPPDATA%/quality-gate`).
@@ -37,18 +37,27 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   hint in a `not run:` line follows `process.platform`, so a Linux hint never says `brew`.
 - `[hooks] pre_push_test_cmd` (`{files}` = the test list; the default comes from the language
   adapter: `node --test {files}`, for Python `uv run --with pytest pytest -q {files}`), `pre_push_timeout` (seconds), `pre_push_max_tests`
-  (at most 40 test files per push). For TS/JS the selection includes direct relative imports,
-  `require` and aliases from `tsconfig.json` `compilerOptions.paths`; dependency depth is one import.
-  `check --tests` and `mutant` take every touched test and also count a test that reaches the source
-  through one intermediate repo file (test -> harness or module -> source). For them a test beside the
-  source named `<stem>.<anything>.test.<ext>` is a named test (`ThemePanel.render.test.ts` for
-  `ThemePanel.tsx`), and a quoted string in a test that resolves from the test's folder to a tracked
-  file counts as an import of it (`runHarness(resolve(import.meta.dir, "ThemePanel.render-harness.tsx"))`),
-  so test -> harness -> screen is found. A component one more step away (test -> harness -> screen ->
-  component) is not selected; the project's full run covers it. Pre-push selection is unchanged.
+  (at most 40 test files per push). For TS/JS the pre-push selection is names plus direct relative
+  imports, `require` and aliases from the root `tsconfig.json` `compilerOptions.paths`.
+  `check --tests` and `mutant` select the closure: every test that reaches a changed file through any
+  chain of imports, `export … from`, dynamic imports and `require`, plus a quoted string in a test file
+  that resolves from the test's folder to a tracked file (`runHarness(resolve(import.meta.dir,
+  "ThemePanel.render-harness.tsx"))`); so test -> harness -> screen -> barrel -> panel -> component ->
+  util is found. A test beside the source named `<stem>.<anything>.test.<ext>` is a named test
+  (`ThemePanel.render.test.ts` for `ThemePanel.tsx`). The report counts by name, by direct import and
+  further. A module specifier resolves, in order: a relative path; the `paths` of the nearest
+  `tsconfig.json` at or above the importing file's folder (a config without `paths` takes them through
+  a relative `extends`; targets resolve against the `baseUrl` of the config that declares `paths`, else
+  its folder); a workspace package (a tracked `package.json` outside `node_modules` with a `name`: the
+  bare name goes to `exports["."]` as a string or its `import` / `default`, else `module`, else `main`,
+  else `src/index`; `name/sub` goes to `<package>/<sub>` or `<package>/src/<sub>`). Extensions and
+  `/index` as for a relative import; anything else is external. Files in `node_modules` are not part of
+  the chain.
 - `[tests]` - test runs the gate starts. `touched_cmd` - the coverage command of `check --tests`, must
   contain `{files}` (the touched test list, shell-quoted) and write lcov to `$QG_LCOV` (`$QG_DIR` = its
-  private run directory); without it `project.test_cmd` is used when it contains `{files}`, else the
+  private run directory; `$QG_LCOV` starts empty, and the command and the tests' child processes append
+  to it; the built-in commands write the runner's report under `$QG_DIR` and append it, keeping the
+  tests' exit code); without it `project.test_cmd` is used when it contains `{files}`, else the
   adapter's file-aware command (node, bun, vitest, pytest; `note: tests/touched: project.test_cmd has no
   {files}` when a `test_cmd` without `{files}` is set). Other languages run their full coverage command
   with `note: tests/touched not supported for <lang>`. `mutant_cmd` - the test command of `mutant`, must

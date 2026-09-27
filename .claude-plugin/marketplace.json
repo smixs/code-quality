@@ -8,7 +8,7 @@
     {
       "name": "code-quality",
       "source": "./",
-      "version": "1.3.1",
+      "version": "1.3.2",
       "description": "Quality gate for agent and git changes"
     }
   ]

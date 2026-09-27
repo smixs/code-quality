@@ -33,7 +33,7 @@ Old debt does not block, it lives in the baseline and in `check --all`.
 | `cov/diff` | less than 80% of added executable lines covered | lcov defines the executable lines; the output lists up to 20 uncovered `file:line`; with `check --tests` a changed source missing from the touched lcov also blocks |
 | `tests/red` | `check --tests`: a touched test fails | block; the line names the log in the private run directory, which is kept |
 | `tests/timeout` | `check --tests`: the touched run exceeds `[tests] touched_timeout_s` | block; the run's process group is killed |
-| `tests: ERROR invalid coverage` | `check --tests`: the run exits 0 but its lcov is missing, empty or unreadable, has no `DA` line, a `DA` outside an `SF` ... `end_of_record` record, an `SF` inside an open record or a record left open | block |
+| `tests: ERROR invalid coverage` | `check --tests` (a run that exits 0) and the full gate: the lcov is empty or unreadable (missing: this error for `check --tests`, `no coverage at <path>` with exit 2 for the full gate), has no `DA` line, a `DA` outside an `SF` ... `end_of_record` record, an `SF` inside an open record or a record left open | block |
 
 ## Acceptance and mutants
 
