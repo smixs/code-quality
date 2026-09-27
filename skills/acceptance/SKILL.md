@@ -118,7 +118,7 @@ When the lanes are back, the lead writes the verdict per [references/verdict-and
 ## 8. Service: landing and the live check
 
 - Before landing the lead checks the permissions for commit, merge and push separately. No permission means a local delivery.
-- The landing run per the card: rebase on origin/main, typecheck, lint, the full suite **once** with a wait for a free machine, the build, the QA mutant on the new SHA with its tests only, fast-forward merge, push. A red test outside the task is named and checked on the base.
+- The landing run per the card: rebase on origin/main, typecheck, lint, the full suite **once** with a wait for a free machine, the build, the QA mutant on the new SHA with its tests only, fast-forward merge, push. A red test outside the task is named and checked on the base. A red on the test's own time limit is rerun alone on the same SHA: green alone means a false red from load, and the test's limit goes up to the common one.
 - After a rebase the gate and the full suite always run on the new SHA. Reviewer and QA verdicts carry over when `git patch-id` of the change is unchanged; otherwise the changed part is checked as in §6.
 - Release and deploy only on the owner's word and by the project's runbook. After the deploy the same scenario runs in production (the card's "after release" surface).
 - Techniques for landing, mutants, PBT and reviewers in a pane: [references/techniques.md](references/techniques.md).
