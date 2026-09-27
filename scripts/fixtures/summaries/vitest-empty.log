@@ -1,0 +1,17 @@
+
+ RUN  v5.0.2 /tmp/fixture
+
+ ❯ empty.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  empty.test.ts [ empty.test.ts ]
+Error: No test suite found in file /tmp/fixture/empty.test.ts
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  08:54:49
+   Duration  144ms (transform 58%, import 26%, worker 15%, environment 1%)
+

@@ -313,6 +313,11 @@ describe("runner summaries", () => {
     });
   }
 
+  test("the runner output fixtures are tracked by git (a clean checkout has them)", () => {
+    const tracked = spawnSync("git", ["ls-files", "--", "scripts/fixtures/summaries"], { cwd: join(import.meta.dir, "../.."), encoding: "utf8" }).stdout.trim().split("\n");
+    expect(tracked).toEqual(expected.map(([name]) => `scripts/fixtures/summaries/${name}.log`).sort());
+  });
+
   test("a log without the runner's summary is an error, not zero", () => {
     expect(parseTestSummary("node", "hello\n")).toEqual({ error: "no node test summary in the log" });
     expect(parseTestSummary("py", readFileSync(join(FIXTURES, "node-pass.log"), "utf8"))).toEqual({ error: "no pytest test summary in the log" });

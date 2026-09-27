@@ -1,0 +1,14 @@
+bun test v1.3.14 (0d9b296a)
+
+fail.test.ts:
+error: expect(received).toBe(expected)
+
+Expected: 3
+Received: 2
+
+(fail) b [1.86ms]
+
+ 1 pass
+ 1 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [9.00ms]

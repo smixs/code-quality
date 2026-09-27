@@ -3,3 +3,5 @@ node_modules/
 *.log
 gitleaks.json
 .worktrees/
+# Real runner output the summary parser is tested against.
+!scripts/fixtures/summaries/*.log

@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /tmp/fixture
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  08:54:47
+   Duration  150ms (transform 57%, import 27%, worker 10%, tests 6%)
+
