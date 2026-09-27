@@ -161,6 +161,18 @@ describe("check --since <rev> --tests", () => {
     expect(refused).toEqual([2, 2, 2, 2, 2, 2]);
   }, 60_000);
 
+  test("flags: --tests belongs to check, --file/--find/--replace to mutant", () => {
+    const repo = changedRepo();
+    const refused = [
+      ["hook", "pre-commit", "--repo", repo, "--tests"],
+      ["--repo", repo, "--tests", "--no-deps"],
+      ["check", "--repo", repo, "--since", "HEAD~1", "--file", "src/calc.ts"],
+      ["check", "--repo", repo, "--since", "HEAD~1", "--find=a"],
+      ["--repo", repo, "--replace=b", "--no-deps"],
+    ].map((args) => [quality(args).status, existsSync(join(repo, OUT, "touched"))]);
+    expect(refused).toEqual(refused.map(() => [2, false]));
+  }, 60_000);
+
   test("a log that cannot be created is a CLI error, exit 2", () => {
     const repo = changedRepo();
     write(repo, `${OUT}/touched`, "a file where the run directories go\n");

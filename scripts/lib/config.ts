@@ -117,10 +117,13 @@ export function readArgs(argv = process.argv.slice(2)) {
   return args;
 }
 
-// check --tests judges one change: exactly one --since. mutant takes repeatable --test; --tests is check's.
+// check --tests judges one change: exactly one --since. --tests belongs to check; --test, --file,
+// --find and --replace belong to mutant.
 function laneArgs(argv: string[], cmd: string, v: Record<string, unknown>) {
   if (cmd === "mutant" && v.tests) throw new Error("mutant takes --test <path> (repeatable), not --tests");
-  if (cmd !== "mutant" && v.test) throw new Error("--test is a mutant flag; check takes --tests");
+  if (cmd !== "check" && v.tests) throw new Error("--tests is a check flag: check --since <rev> --tests");
+  const mutantOnly = ["test", "file", "find", "replace"].filter((flag) => v[flag] !== undefined);
+  if (cmd !== "mutant" && mutantOnly.length) throw new Error(`--${mutantOnly[0]} is a mutant flag`);
   if (cmd !== "check" || !v.tests) return;
   const since = argv.filter((word) => word === "--since" || word.startsWith("--since=")).length;
   if (since !== 1 || v.staged || v.all) throw new Error("check --tests needs exactly one --since <rev> and no --staged or --all");
