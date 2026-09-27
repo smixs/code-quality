@@ -51,12 +51,19 @@ async function checkCmd(args: Args) {
   process.exit(r.ok ? 0 : 1);
 }
 
+// Only the entry points agents call move the machine's hook pointers (root, hooks-root): a copy run
+// by hand, from a worktree or a clone, must not take the git hooks of every repo on the machine.
+const asAgent = (fn: (a: Args) => void | Promise<void>) => (a: Args) => {
+  updatePluginRoot();
+  return fn(a);
+};
+
 const COMMANDS: Record<string, (a: Args) => void | Promise<void>> = {
   check: checkCmd,
   hook: runHook,
-  "agent-stop": agentStop,
+  "agent-stop": asAgent(agentStop),
   mutant: mutantCmd,
-  "guard-bash": guardBash,
+  "guard-bash": asAgent(guardBash),
   "install-hooks": (a) => installHooks(a.positionals[1]),
   "uninstall-hooks": (a) => uninstallHooks(a.positionals[1]),
   "install-grok-hooks": installGrokHooks,
@@ -64,7 +71,6 @@ const COMMANDS: Record<string, (a: Args) => void | Promise<void>> = {
 };
 
 async function main() {
-  updatePluginRoot();
   const args = readArgs();
   const cmd = args.positionals[0];
   if (!cmd) return await full(args);

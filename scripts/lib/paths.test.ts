@@ -110,6 +110,8 @@ describe("install folder", () => {
     mkdirSync(next, { recursive: true });
     for (const dir of ["scripts", "git-hooks", "rules", "adapters", "skills"]) cpSync(join(SKILL, dir), join(next, dir), { recursive: true });
     spawnSync(process.execPath, [join(next, "scripts/quality.ts"), "check", "--if-configured", "--repo", repo], { encoding: "utf8", env: testEnv });
+    expect(["root", "hooks-root"].map((name) => readFileSync(join(testHome, name), "utf8").trim())).toEqual([realpathSync(install), realpathSync(install)]);
+    spawnSync(process.execPath, [join(next, "scripts/quality.ts"), "guard-bash"], { input: '{"tool_input":{"command":"true"}}', encoding: "utf8", env: testEnv });
     expect(["root", "hooks-root"].map((name) => readFileSync(join(testHome, name), "utf8").trim())).toEqual([realpathSync(next), realpathSync(next)]);
     writeFileSync(join(repo, "README.md"), "# a\n\nb\n\nc\n");
     expect(commit(repo, "docs: third line").status).toBe(0);

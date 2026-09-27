@@ -32,11 +32,18 @@ export const hooksDir = () => join(pluginHome(), "git-hooks");
 // the hooks only when it is not older than the copy named there, or that copy is gone; install-hooks
 // takes them outright. Shims up to 1.2.0 read `root`, the last invoked copy: on 26.09 a pi session
 // still on 1.0.0 rewrote it seconds before a push, and the push ran 1.0.0. `root` is kept for them.
+// Only agent-stop and guard-bash call this: on 27.09 copies run by hand from worktrees took the hooks
+// of every repo on the machine three times.
 export function updatePluginRoot() {
+  const home = writeRoot();
+  if (takesHooks(home)) pointHooks(home);
+}
+
+function writeRoot() {
   const home = pluginHome();
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "root"), PLUGIN_ROOT + "\n");
-  if (takesHooks(home)) pointHooks(home);
+  return home;
 }
 
 function takesHooks(home: string) {
@@ -275,7 +282,7 @@ export function installHooks(path: string | undefined) {
   const target = hooksDir();
   if (cur && cur !== target && cur !== LEGACY_HOOKS_DIR) git(repo, "config", "--local", PREV_KEY, cur);
   mkdirSync(target, { recursive: true });
-  pointHooks(pluginHome());
+  pointHooks(writeRoot());
   git(repo, "config", "--local", "core.hooksPath", target);
   console.log([`hooks installed: ${repo} core.hooksPath=${target}`, chainNote(repo), ...installNotes(repo)].join("\n"));
 }
