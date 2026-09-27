@@ -45,12 +45,16 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   "ThemePanel.render-harness.tsx"))`); so test -> harness -> screen -> barrel -> panel -> component ->
   util is found. A test beside the source named `<stem>.<anything>.test.<ext>` is a named test
   (`ThemePanel.render.test.ts` for `ThemePanel.tsx`). The report counts by name, by direct import and
-  further. A module specifier resolves, in order: a relative path; the `paths` of the nearest
-  `tsconfig.json` at or above the importing file's folder (a config without `paths` takes them through
-  a relative `extends`; targets resolve against the `baseUrl` of the config that declares `paths`, else
-  its folder); a workspace package (a tracked `package.json` outside `node_modules` with a `name`: the
-  bare name goes to `exports["."]` as a string or its `import` / `default`, else `module`, else `main`,
-  else `src/index`; `name/sub` goes to `<package>/<sub>` or `<package>/src/<sub>`). Extensions and
+  further. A module specifier resolves, in order: a relative path; a `#…` specifier through the
+  `imports` of the nearest tracked `package.json` at or above the importing file's folder (targets, a
+  string or the `import` / `default` of a condition object, from that `package.json`'s folder); the
+  `paths` of the nearest `tsconfig.json` at or above that folder (a config without `paths` takes them
+  through a relative `extends`; targets resolve against the `baseUrl` of the config that declares
+  `paths`, else its folder); a workspace package (a tracked `package.json` outside `node_modules` with a
+  `name`: the bare name goes to `exports` as a string or `exports["."]` as a string or its `import` /
+  `default`, else `module`, else `main`, else `src/index`; `name/sub` goes to `<package>/<sub>` or
+  `<package>/src/<sub>`). In `imports` and `paths` an exact key wins, else the `*` pattern with the
+  longest prefix before `*`, and only that key's targets are tried, in their order. Extensions and
   `/index` as for a relative import; anything else is external. Files in `node_modules` are not part of
   the chain.
 - `[tests]` - test runs the gate starts. `touched_cmd` - the coverage command of `check --tests`, must
