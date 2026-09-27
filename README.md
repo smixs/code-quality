@@ -114,7 +114,7 @@ bun scripts/quality.ts install-hooks <repo>
 bun scripts/quality.ts --repo <repo> --update-baseline
 ```
 
-`install-hooks` sets `core.hooksPath` to `~/.local/share/code-quality/git-hooks/`, or `$CODE_QUALITY_HOME/git-hooks/`. The hooks run the newest plugin copy invoked on this machine, so an agent session still on an older copy cannot take them back. Existing repository hooks are chained. See [configuration](skills/code-quality/references/config.md).
+`install-hooks` sets `core.hooksPath` to `~/.local/share/code-quality/git-hooks/`, or `$CODE_QUALITY_HOME/git-hooks/`. The hooks run the newest plugin copy an agent invoked on this machine (its Stop or shell guard hook), so an agent session still on an older copy cannot take them back, and a copy run by hand from a clone or a worktree never takes them. Existing repository hooks are chained. See [configuration](skills/code-quality/references/config.md).
 
 ## Jev, optional
 

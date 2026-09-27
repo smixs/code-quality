@@ -40,7 +40,12 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   (at most 40 test files per push). For TS/JS the selection includes direct relative imports,
   `require` and aliases from `tsconfig.json` `compilerOptions.paths`; dependency depth is one import.
   `check --tests` and `mutant` take every touched test and also count a test that reaches the source
-  through one intermediate repo file (test -> harness or module -> source).
+  through one intermediate repo file (test -> harness or module -> source). For them a test beside the
+  source named `<stem>.<anything>.test.<ext>` is a named test (`ThemePanel.render.test.ts` for
+  `ThemePanel.tsx`), and a quoted string in a test that resolves from the test's folder to a tracked
+  file counts as an import of it (`runHarness(resolve(import.meta.dir, "ThemePanel.render-harness.tsx"))`),
+  so test -> harness -> screen is found. A component one more step away (test -> harness -> screen ->
+  component) is not selected; the project's full run covers it. Pre-push selection is unchanged.
 - `[tests]` - test runs the gate starts. `touched_cmd` - the coverage command of `check --tests`, must
   contain `{files}` (the touched test list, shell-quoted) and write lcov to `$QG_LCOV` (`$QG_DIR` = its
   private run directory); without it `project.test_cmd` is used when it contains `{files}`, else the
@@ -85,7 +90,7 @@ The list of guarded keys and the rule for changing them together with sources is
 ## Git hooks
 
 
-`install-hooks <repo>` writes a stable `core.hooksPath` under `~/.local/share/code-quality/git-hooks/` (override with `CODE_QUALITY_HOME`). Its `hooks-root` names the plugin copy the hooks run: the newest copy invoked on this machine, or the last one when that copy is gone (`root`). The repo's own hooks (Git LFS, husky, anything else) keep working: every wrapper calls the previous hook with the same arguments and returns its exit code. `uninstall-hooks <repo>` puts the old value back. `[hooks] block_bypass = false` disables the agent shell guard; the default is `true`.
+`install-hooks <repo>` writes a stable `core.hooksPath` under `~/.local/share/code-quality/git-hooks/` (override with `CODE_QUALITY_HOME`). Its `hooks-root` names the plugin copy the hooks run: the newest copy an agent invoked on this machine through `agent-stop` or `guard-bash`, or the last one when that copy is gone (`root`). Only those two entry points and `install-hooks` write `root` and `hooks-root`; a copy run by hand (`check`, `mutant`, the full gate, `hook ...`) leaves both alone. The repo's own hooks (Git LFS, husky, anything else) keep working: every wrapper calls the previous hook with the same arguments and returns its exit code. `uninstall-hooks <repo>` puts the old value back. `[hooks] block_bypass = false` disables the agent shell guard; the default is `true`.
 
 ## Stop hooks
 
