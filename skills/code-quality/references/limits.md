@@ -36,7 +36,10 @@
 - Jev sees the test hunks of the language adapter's `testGlobs`; over a whole workflow there are fewer
   true positives than in a curated sample, so `textual_test` precision is lower (about 0.65).
 - Flaky tests move coverage: on a changed function that can give a false CRAP > 30, rerun.
-- `pre-push` runs the tests of the working tree, not of the pushed commit. It prints `touched tests: N
+- `pre-push` runs the touched tests on the working tree, and only after two checks: every pushed ref
+  that adds files peels to `HEAD` of the checkout, and the files of the pushed ranges and the selected
+  tests have no uncommitted changes; otherwise it blocks before any test runs (push from a checkout of
+  that commit). Dirt elsewhere in the tree does not block. It prints `touched tests: N
   by name, M by import`; importers are searched one level deep and cut off by the shared
   `hooks.pre_push_max_tests` limit. The first push of a new branch without `project.base` (no
   `origin/main`) takes the diff from the parent, the root commit from an empty tree.
