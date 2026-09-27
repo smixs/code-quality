@@ -77,6 +77,13 @@ describe("mutant outcomes", () => {
     expect([r.status, r.stdout.includes("MUTANT ERROR: original tests: cannot be read: no node, bun, vitest or pytest test summary in the log")]).toEqual([2, true]);
   }, 60_000);
 
+  test("a preflight over mutant_timeout_s is MUTANT ERROR, nothing written", () => {
+    const repo = calcRepo("mutant_timeout_s = 2\nmutant_cmd = 'sleep 30; : {files}'");
+    const before = sha(repo);
+    const r = mutant(repo, ...KILLS);
+    expect([r.status, r.stdout.includes("MUTANT ERROR: original tests: timed out after 2s"), sha(repo), noState(repo)]).toEqual([2, true, before, true]);
+  }, 60_000);
+
   test("a mutated run over mutant_timeout_s is MUTANT ERROR, restored", () => {
     const repo = calcRepo(`mutant_timeout_s = 2\n${secondRun("sleep 30")}`);
     const before = sha(repo);

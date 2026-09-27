@@ -131,6 +131,22 @@ describe("check --since <rev> --tests", () => {
     }, 60_000);
   }
 
+  test("an unreadable lcov (no read permission) is tests: ERROR invalid coverage, exit 1", () => {
+    const repo = changedRepo([ADD_TEST], `touched_cmd = '''printf '${lcovOf("src/calc.ts", [1, 2, 3, 4])}' > "$QG_LCOV"; chmod 000 "$QG_LCOV"; : {files}'''`);
+    const r = checkTests(repo);
+    expect([r.status, /^tests: ERROR invalid coverage at \S+lcov\.info, see \S+tests\.log$/m.test(r.stdout)]).toEqual([1, true]);
+  }, 60_000);
+
+  test("a language without a file-aware coverage command: note, then the adapter's full coverage command", () => {
+    const repo = nodeRepo({ "go.mod": "module example.test/m\n", "src/calc.go": "package calc\nfunc Add(a, b int) int { return a + b }\n", "src/calc_test.go": "package calc\nimport \"testing\"\nfunc TestAdd(t *testing.T) { if Add(1, 2) != 3 { t.Fail() } }\n" }, "", false);
+    write(repo, ".quality.toml", read(repo, ".quality.toml").replace('language = "ts"', 'language = "go"'));
+    commit(repo, "go");
+    write(repo, "src/calc.go", "package calc\nfunc Add(a, b int) int { return b + a }\n");
+    commit(repo);
+    const r = checkTests(repo);
+    expect([r.stdout.includes("touched tests: 1 by name"), r.stdout.includes("note: tests/touched not supported for go"), r.stdout.includes("note: tests/touched command: go test ./... -coverprofile")]).toEqual([true, true, true]);
+  }, 60_000);
+
   test("valid lcov that lacks the changed source is the blocking cov/diff finding", () => {
     const repo = changedRepo([ADD_TEST], `touched_cmd = '''printf '${lcovOf("src/other.ts", [1])}' > "$QG_LCOV"; : {files}'''`);
     const r = checkTests(repo);

@@ -96,6 +96,17 @@ describe("pre-push judges the pushed commit", () => {
     }, 60_000);
   }
 
+  test("a detached HEAD at the pushed commit runs the tests; detached elsewhere is blocked", () => {
+    const at = twoCheckouts(NEG_TEST);
+    git(at.wt, "checkout", "-q", "--detach", at.b);
+    const ok = push(at.wt, [`HEAD ${at.b} refs/heads/B ${at.base}`]);
+    expect([ok.status, ok.started]).toEqual([0, true]);
+    const off = twoCheckouts(NEG_TEST);
+    git(off.wt, "checkout", "-q", "--detach", off.base);
+    const blocked = push(off.wt, [`HEAD ${off.b} refs/heads/B ${off.base}`]);
+    expect([blocked.status === 0, blocked.out.includes("pre-push: pushing"), blocked.out.includes("(HEAD), this checkout is at"), blocked.started]).toEqual([false, true, true, false]);
+  }, 60_000);
+
   test("a deletion push checks nothing and runs nothing", () => {
     const { main } = twoCheckouts(NEG_TEST);
     const r = push(main, [`(delete) ${ZERO} refs/heads/B ${git(main, "rev-parse", "HEAD")}`]);
