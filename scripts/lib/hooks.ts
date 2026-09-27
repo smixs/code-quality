@@ -163,6 +163,8 @@ export async function prePush(o: Opts, stdin: string) {
   const noTest = pushNoTestCheck(o, ranges, sourceChanged, tests.length);
   const baseChecks = [tamper, noTest, ...security];
   if (noTest.findings.length) return finishPrePush(o, { ok: false, text: touchedLine }, baseChecks);
+  const tree = tests.length ? treeProblem(o, pushed, tests) : "";
+  if (tree) return finishPrePush(o, { ok: false, text: `${touchedLine}\n${tree}` }, baseChecks);
   const test = tests.length ? await runTouchedTests(o, tests, touchedLine) : { ok: true, text: `${touchedLine}\npre-push: no touched tests` };
   if (!test.ok) return finishPrePush(o, test, baseChecks);
   const coverage = diffCoverageCheck(o, ch, runTests(o, "fresh-or-none"), { lowCoverage: true, missingFiles: false });
@@ -179,6 +181,21 @@ function checkOutput(item: Check) {
   if (item.error) return [`${item.name}: ERROR ${item.error}`];
   if (item.findings.length) return item.findings.map(findingLine);
   return item.notices.length ? item.notices : item.note ? [item.note] : [];
+}
+
+// The touched tests (and the coverage check after them) read the checked-out tree, so the verdict
+// belongs to the pushed commit only when that tree is it: every pushed ref that adds files peels to
+// HEAD, and the files of the pushed ranges and the selected tests have no uncommitted changes.
+// Dirt elsewhere in a shared checkout does not matter.
+function treeProblem(o: Opts, pushed: Pushed[], tests: string[]) {
+  const head = git(o.repo, "rev-parse", "HEAD").trim();
+  const withFiles = pushed.map((p) => ({ ...p, files: lines(gitPaths(o.repo, "diff", "--name-only", p.range)) })).filter((p) => p.files.length);
+  const other = withFiles.find((p) => git(o.repo, "rev-parse", `${p.local}^{commit}`).trim() !== head);
+  const short = (sha: string) => git(o.repo, "rev-parse", "--short", sha).trim();
+  if (other) return `pre-push: pushing ${short(other.local)} (${other.ref}), this checkout is at ${short(head)}; touched tests run on the checked-out tree, push from a checkout of that commit`;
+  const paths = [...new Set([...withFiles.flatMap((p) => p.files), ...tests])];
+  const dirty = lines(gitPaths(o.repo, "status", "--porcelain", "--untracked-files=all", "--", ...paths)).map((line) => line.slice(3));
+  return dirty.length ? `pre-push: uncommitted changes in files the touched tests read: ${dirty.slice(0, 10).join(", ")}; commit or stash them` : "";
 }
 
 async function runTouchedTests(o: Opts, tests: string[], touchedLine: string) {
