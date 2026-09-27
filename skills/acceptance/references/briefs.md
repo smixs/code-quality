@@ -23,7 +23,7 @@ Last command: <how to tell the lead, for example a message to the lead's session
 You are a reviewer. Do not change code. checkout, stash, reset, clean and restore are forbidden.
 Task: <one line>. Spec: <path>, version <N>, the "Finish line" and "Failure table" sections.
 Your worktree: <path>, detached at <head>. Range: git diff <base>..<head>. First check that HEAD = <head> and git status is empty.
-Your half: <B | C>. Cover it fully. Report a proven blocker outside your half, but do not repeat the other half's checklist.
+Your half: <B | C>. Cover it fully. The half is the required minimum, not a border: look around for what else the change touched. A proven finding outside your half is accepted; do not repeat the other half's checklist.
 
 B. Correctness:
 - Every failure-table row against the code. Boundary inputs. An error swallowed or loud. Retry, a crash midway, a second writer, the order of writes.

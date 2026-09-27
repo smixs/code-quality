@@ -15,6 +15,7 @@ One per project. It lives in a project document (for example `docs/acceptance-st
    - Evidence: what to capture and where to put it.
    - Cleanup: what to tear down; evidence stays.
    - Rollback.
+   - For a tool other projects use, the before-merge check runs on a real consumer repo, not on a sample (27.09: 1.3.0 passed a harness sample and missed 73 render tests of the sotish admin).
 6. **Test and landing environment.** A test environment without production secrets; personal and production `.env` files are never copied into a worktree.
 7. **Machine limits.** Executors, heavy runs, browsers. The load threshold for a heavy run. Read-only reviewers do not count against the limit; gate runs and mutants queue.
 8. **Known red tests outside the task.** Test name, cause, since when. So nobody mistakes them for a regression.
