@@ -34,6 +34,8 @@ function childEnv(cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env
   return withoutRepoVars(env);
 }
 
+export const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+
 export function withoutRepoVars(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out = { ...env };
   for (const key of GIT_REPO_VARS) delete out[key];

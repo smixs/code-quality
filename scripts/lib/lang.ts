@@ -90,12 +90,52 @@ const PY_TEST_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-repor
 
 export const prePushTestCommand = (adapter?: LanguageAdapter) => adapter?.prePushTest || DEFAULT_PRE_PUSH;
 
+// File-aware commands, {files} = the test list: coverage of the touched tests for `check --tests`, and
+// the plain run for `mutant`. Only node, bun, vitest and pytest have them.
+const NODE_TOUCHED_COVERAGE = `${NODE_TEST_COVERAGE} {files}`;
+const BUN_TOUCHED_COVERAGE = 'bun test {files} --coverage --coverage-reporter=lcov --coverage-dir="$QG_DIR/bun" && cp "$QG_DIR/bun/lcov.info" "$QG_LCOV"';
+const VITEST_TOUCHED_COVERAGE = 'npx vitest run {files} --coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory="$QG_DIR/vitest" && cp "$QG_DIR/vitest/lcov.info" "$QG_LCOV"';
+const PY_TOUCHED_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV" {files}';
+
+export type Runner = "node" | "bun" | "vitest" | "py";
+
+function runnerOf(repo: string, lang: string, readPackage: (path: string) => string): Runner {
+  if (lang === "py") return "py";
+  const pkg = readPackage(join(repo, "package.json"));
+  if (!pkg) return "bun";
+  return pkg.includes('"vitest"') ? "vitest" : "node";
+}
+
+const FULL_COVERAGE: Record<Runner, string> = { node: NODE_TEST_COVERAGE, bun: BUN_TEST_COVERAGE, vitest: VITEST_COVERAGE, py: PY_TEST_COVERAGE };
+const TOUCHED_COVERAGE: Record<Runner, string> = { node: NODE_TOUCHED_COVERAGE, bun: BUN_TOUCHED_COVERAGE, vitest: VITEST_TOUCHED_COVERAGE, py: PY_TOUCHED_COVERAGE };
+const FILE_TESTS: Record<Runner, string> = { node: DEFAULT_PRE_PUSH, bun: "bun test {files}", vitest: "npx vitest run {files}", py: PY_PRE_PUSH };
+
 // The full gate's default coverage command: the repo's own runner decides, not the caller.
 export function defaultTestCommand(repo: string, lang: string, readPackage: (path: string) => string) {
-  if (lang === "py") return PY_TEST_COVERAGE;
-  const pkg = readPackage(join(repo, "package.json"));
-  if (!pkg) return BUN_TEST_COVERAGE;
-  return pkg.includes('"vitest"') ? VITEST_COVERAGE : NODE_TEST_COVERAGE;
+  return FULL_COVERAGE[runnerOf(repo, lang, readPackage)];
+}
+
+export type TestCommandInput = { repo: string; lang: string; readPackage: (path: string) => string; tests: { touched_cmd: string; mutant_cmd: string }; testCmd: string };
+
+// check --tests: [tests] touched_cmd, then project.test_cmd when it takes {files}, else the adapter's
+// file-aware coverage command. Without a file-aware command the adapter's full coverage command runs.
+export function touchedCoverageCommand(input: TestCommandInput) {
+  if (input.tests.touched_cmd) return { cmd: input.tests.touched_cmd, notes: [] as string[] };
+  if (input.testCmd.includes("{files}")) return { cmd: input.testCmd, notes: [] as string[] };
+  const notes = input.testCmd ? ["note: tests/touched: project.test_cmd has no {files}"] : [];
+  if (input.lang === "ts" || input.lang === "py") return { cmd: TOUCHED_COVERAGE[runnerOf(input.repo, input.lang, input.readPackage)], notes };
+  return { cmd: adapterById(input.lang)?.coverage.command ?? "", notes: [...notes, `note: tests/touched not supported for ${input.lang}`] };
+}
+
+// The runner whose summary the test log carries; null = none of node, bun, vitest, pytest.
+export function testRunner(repo: string, lang: string, readPackage: (path: string) => string): Runner | null {
+  return lang === "ts" || lang === "py" ? runnerOf(repo, lang, readPackage) : null;
+}
+
+// mutant: [tests] mutant_cmd, else the adapter's file-aware test command; "" = none for this language.
+export function mutantTestCommand(input: TestCommandInput) {
+  if (input.tests.mutant_cmd) return input.tests.mutant_cmd;
+  return input.lang === "ts" || input.lang === "py" ? FILE_TESTS[runnerOf(input.repo, input.lang, input.readPackage)] : "";
 }
 const osv = (fallback?: string) => ({ ...tool("osv-scanner", "osv-scanner scan source --format json .", installHint("osv-scanner")), fallback });
 const patterns = (test: string[], assert: string[], ...flags: [string[], string[], string[]]): TestPatterns => ({
