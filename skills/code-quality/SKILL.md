@@ -23,6 +23,8 @@ The acceptance verdict on a change is `check --since <base> --tests`. The full g
 
 CRAP needs fresh lcov (`<out_dir>/lcov.info`, by default `.scratch/quality`, with a matching fingerprint). Without it a fast entry point prints `tests: not run, no fresh lcov` and judges complexity only. A change of docs and config only (`.md`, `.toml`, `.json`, `.yml` outside `project.src`) prints `scope: docs-only` and skips the code checks.
 
+The process around the gate, from the spec to landing, is the `acceptance` skill in this plugin: [../acceptance/SKILL.md](../acceptance/SKILL.md).
+
 ## Commands
 
 ```bash

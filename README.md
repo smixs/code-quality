@@ -143,6 +143,7 @@ Details, the model pins and the curl for each: [Jev reference](skills/code-quali
 - [Languages and adapters](skills/code-quality/references/languages.md)
 - [Configure `.quality.toml` and hooks](skills/code-quality/references/config.md)
 - [Jev: an optional classifier for test and source hunks](skills/code-quality/references/jev.md)
+- [Acceptance: the runbook for accepting a change](skills/acceptance/SKILL.md): a spec with a failure table, one parallel pass on a frozen candidate, one batched repair, two rounds
 - [SKILL.md](skills/code-quality/SKILL.md), the full reference the agent reads
 
 ## Credits
