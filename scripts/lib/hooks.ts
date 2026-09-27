@@ -1,20 +1,25 @@
 // git hooks (pre-commit, commit-msg, pre-push), hook install/uninstall and the agent Stop contract.
 // Every entry point runs the same analysis; vendors only differ in how they call this file.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { type Args, buildOpts, CONFIG_FILE, DEFAULTS, type Opts, readArgs, repoConfigFile } from "./config.ts";
 import { runTests } from "./crap.ts";
 import { parseDiff, type Changes } from "./diff.ts";
 import { diffCoverageCheck } from "./diffcov.ts";
+import { acceptanceTests, type Lane } from "./accept.ts";
 import { adapterAuditGateChecks, analyze, gate } from "./gate.ts";
 import { checkNotices, failCount, testsLine, verdictText, writeHookReport, writeReport } from "./report.ts";
 import { defaultJev, type JevDeps, jevNotes } from "./jev.ts";
-import { adapterById, adapterForFile, isTestFile, prePushTestCommand, siblingTestFiles } from "./lang.ts";
+import { adapterById, prePushTestCommand } from "./lang.ts";
+import { runTestProcess } from "./testrun.ts";
 import { gitleaksCheck } from "./security.ts";
 import { isProjectSource, tamperCheck } from "./tamper.ts";
 import { commitMsgFindings } from "./text.ts";
-import { bypassNote, check, type Check, emptyTree, findingLine, git, gitPaths, lines, notedCheck, refuse, run } from "./util.ts";
+import { noTestCheck, touchedTestSelection } from "./touched.ts";
+import { type Check, emptyTree, findingLine, git, gitPaths, lines, notedCheck, refuse, run, shq } from "./util.ts";
+
+export { touchedTests } from "./touched.ts";
 
 export const SOURCE_HOOKS_DIR = resolve(import.meta.dir, "../../git-hooks");
 export const LEGACY_HOOKS_DIR = resolve(import.meta.dir, "../../hooks");
@@ -68,15 +73,27 @@ const ZERO = /^0+$/;
 // ---- check: deterministic gate on the current change (seconds)
 
 // ok is decided by the deterministic checks only; Jev lines are notes.
+// check --tests runs the touched tests first and the analysis reads their coverage in this process.
 export async function runCheck(o: Opts, jev: JevDeps = defaultJev()) {
-  const a = analyze(o, "fresh-or-none");
+  const lane = o.flags.tests === true ? await acceptanceTests(o) : null;
+  const a = analyze(o, "fresh-or-none", lane?.tests);
+  if (lane) a.checks.push(...lane.checks);
   const g = gate(o, a);
   const report = writeReport(o, a, g, "check.md");
   const notes = o.toml.review.jev ? await jevNotes(o, a.ch, jev) : [];
   const verdict = verdictText(g.checks, a, false);
   const scope = a.docsOnly ? ["scope: docs-only"] : [];
-  const text = [testsLine(a.tests), ...scope, verdict, ...checkNotices(g.checks), ...escalateLines(g.escalate), ...notes, ...llmLines(o), `report: ${report}`].join("\n");
+  const tests = lane ? lane.lines : [testsLine(a.tests)];
+  const text = [...tests, ...scope, verdict, ...checkNotices(g.checks), ...escalateLines(g.escalate), ...notes, ...llmLines(o), ...laneDir(lane), `report: ${report}`].join("\n");
   return { ok: failCount(g.checks) === 0, text, verdict };
+}
+
+// The private run directory goes after the verdict; a failed run keeps it and says where.
+function laneDir(lane: Lane | null) {
+  if (!lane?.dir) return [];
+  if (lane.failed) return [`tests: run files kept at ${lane.dir}`];
+  rmSync(lane.dir, { recursive: true, force: true });
+  return [];
 }
 
 // verdict = the deterministic red lines only; the Stop retry key is built from it, never from notes.
@@ -107,11 +124,17 @@ function commitMsg(o: Opts, file: string) {
   process.exit(found.length ? 1 : 0);
 }
 
-type Push = { local: string; remote: string };
+type Push = { ref: string; local: string; remote: string };
+type Pushed = { ref: string; local: string; range: string };
+
+// One entry per pushed ref that is not a deletion: its local ref, its sha, and the range it adds.
+function pushedRefs(o: Opts, stdin: string): Pushed[] {
+  const refs: Push[] = lines(stdin).map((l) => l.split(" ")).map(([ref, local, , remote]) => ({ ref, local, remote }));
+  return refs.filter((r) => !ZERO.test(r.local)).map((r) => ({ ref: r.ref, local: r.local, range: `${ZERO.test(r.remote) ? mergeBase(o, r.local) : r.remote}..${r.local}` }));
+}
 
 export function pushRanges(o: Opts, stdin: string): string[] {
-  const refs: Push[] = lines(stdin).map((l) => l.split(" ")).map(([, local, , remote]) => ({ local, remote }));
-  return refs.filter((r) => !ZERO.test(r.local)).map((r) => `${ZERO.test(r.remote) ? mergeBase(o, r.local) : r.remote}..${r.local}`);
+  return pushedRefs(o, stdin).map((p) => p.range);
 }
 
 // A new branch diffs from the merge base with project.base; without one (no origin/main yet) from the
@@ -122,82 +145,14 @@ function mergeBase(o: Opts, sha: string) {
   return run("git", ["rev-parse", "-q", "--verify", `${sha}~1`], o.repo).code === 0 ? `${sha}~1` : emptyTree(o.repo);
 }
 
-export function touchedTests(o: Opts, files: string[]) {
-  return touchedTestSelection(o, files).tests;
-}
-
-function touchedTestSelection(o: Opts, files: string[]) {
-  const named = existingNamedTests(o, files);
-  const imported = importingTests(o, files).filter((file) => !named.includes(file));
-  const max = Math.max(0, Math.floor(Number(o.toml.hooks.pre_push_max_tests)));
-  const byName = named.slice(0, max);
-  const byImport = imported.slice(0, Math.max(0, max - byName.length));
-  return { tests: [...byName, ...byImport], byName: byName.length, byImport: byImport.length, omitted: named.length + imported.length - byName.length - byImport.length, max };
-}
-
-function existingNamedTests(o: Opts, files: string[]) {
-  const candidates = files.flatMap((file) => (isTestFile(o.langs, file) ? [file] : siblingTestFiles(o.langs, file)));
-  return [...new Set(candidates)].filter((file) => existsSync(join(o.repo, file))).sort();
-}
-
-function importingTests(o: Opts, files: string[]) {
-  const sources = files.filter((file) => isProjectSource(o, file) && adapterForFile(o.langs, file)?.id === "ts");
-  if (!sources.length) return [];
-  const aliases = tsAliases(o.repo);
-  const tests = lines(gitPaths(o.repo, "ls-files")).filter((file) => isTestFile(o.langs, file) && adapterForFile(o.langs, file)?.id === "ts").sort();
-  return tests.filter((test) => testImportsSource(o.repo, test, sources, aliases));
-}
-
-type Alias = { pattern: string; target: string };
-
-function testImportsSource(repo: string, test: string, sources: string[], aliases: Alias[]) {
-  const path = join(repo, test);
-  if (!existsSync(path)) return false;
-  const modules = [...readFileSync(path, "utf8").matchAll(/(?:\bfrom\s*|\brequire\s*\(\s*|\bimport\s*(?:\(\s*)?)["'`]([^"'`]+)["'`]/g)].map((match) => match[1]);
-  return modules.some((module) => sources.some((source) => importTargets(test, module, source, aliases)));
-}
-
-function importTargets(test: string, module: string, source: string, aliases: Alias[]) {
-  if (module.startsWith(".")) return sameModule(source, normalize(join(dirname(test), module)));
-  return aliases.some((alias) => sameModule(source, expandAlias(alias, module)));
-}
-
-function sameModule(source: string, target: string) {
-  if (!target) return false;
-  const from = stripModuleExt(normalize(source));
-  const to = stripModuleExt(normalize(target));
-  return from === to || from === `${to}/index`;
-}
-
-const stripModuleExt = (file: string) => file.replace(/\.[cm]?[jt]sx?$/, "");
-
-function expandAlias(alias: Alias, module: string) {
-  const star = alias.pattern.indexOf("*");
-  if (star < 0) return alias.pattern === module ? alias.target : "";
-  const prefix = alias.pattern.slice(0, star);
-  const suffix = alias.pattern.slice(star + 1);
-  if (!module.startsWith(prefix) || !module.endsWith(suffix)) return "";
-  return alias.target.replace("*", module.slice(prefix.length, module.length - suffix.length));
-}
-
-function tsAliases(repo: string): Alias[] {
-  const path = join(repo, "tsconfig.json");
-  if (!existsSync(path)) return [];
-  const text = readFileSync(path, "utf8");
-  const body = /["']paths["']\s*:\s*\{([^}]*)\}/.exec(text)?.[1] ?? "";
-  const base = /["']baseUrl["']\s*:\s*["']([^"']+)["']/.exec(text)?.[1] ?? ".";
-  return [...body.matchAll(/["']([^"']+)["']\s*:\s*\[([^\]]*)\]/g)].flatMap((match) => [...match[2].matchAll(/["']([^"']+)["']/g)].map((target) => ({ pattern: match[1], target: normalize(join(base, target[1])) })));
-}
-
 function prePushCmd(o: Opts) {
   return o.toml.hooks.pre_push_test_cmd || prePushTestCommand(adapterById(o.lang));
 }
 
-const shq = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-
-export function prePush(o: Opts, stdin: string) {
+export async function prePush(o: Opts, stdin: string) {
   const security = [gitleaksCheck(o), ...adapterAuditGateChecks(o)];
-  const ranges = pushRanges(o, stdin);
+  const pushed = pushedRefs(o, stdin);
+  const ranges = pushed.map((p) => p.range);
   const ch = pushedChanges(o, ranges);
   const tamper = pushedTamperCheck(o, ranges);
   const files = ranges.flatMap((r) => lines(gitPaths(o.repo, "diff", "--name-only", r)));
@@ -205,10 +160,10 @@ export function prePush(o: Opts, stdin: string) {
   const tests = touched.tests;
   const touchedLine = `touched tests: ${touched.byName} by name, ${touched.byImport} by import${touched.omitted ? `, ${touched.omitted} omitted by hooks.pre_push_max_tests=${touched.max}` : ""}`;
   const sourceChanged = files.some((f) => isProjectSource(o, f));
-  const noTest = noTestCheck(o, ranges, sourceChanged, tests.length);
+  const noTest = pushNoTestCheck(o, ranges, sourceChanged, tests.length);
   const baseChecks = [tamper, noTest, ...security];
   if (noTest.findings.length) return finishPrePush(o, { ok: false, text: touchedLine }, baseChecks);
-  const test = tests.length ? runTouchedTests(o, tests, touchedLine) : { ok: true, text: `${touchedLine}\npre-push: no touched tests` };
+  const test = tests.length ? await runTouchedTests(o, tests, touchedLine) : { ok: true, text: `${touchedLine}\npre-push: no touched tests` };
   if (!test.ok) return finishPrePush(o, test, baseChecks);
   const coverage = diffCoverageCheck(o, ch, runTests(o, "fresh-or-none"), { lowCoverage: true, missingFiles: false });
   return finishPrePush(o, test, [...baseChecks, coverage]);
@@ -226,26 +181,16 @@ function checkOutput(item: Check) {
   return item.notices.length ? item.notices : item.note ? [item.note] : [];
 }
 
-function runTouchedTests(o: Opts, tests: string[], touchedLine: string) {
+async function runTouchedTests(o: Opts, tests: string[], touchedLine: string) {
   const cmd = prePushCmd(o).replace("{files}", tests.map(shq).join(" "));
-  // A fresh worktree has no report directory yet, and the shell cannot open the log in a missing one.
-  mkdirSync(o.out, { recursive: true });
-  const log = join(o.out, "pre-push.log");
-  const t0 = Date.now();
-  const r = run("sh", ["-c", `${cmd} > ${shq(log)} 2>&1`], o.repo, { timeout: o.toml.hooks.pre_push_timeout * 1000 });
-  const secs = ((Date.now() - t0) / 1000).toFixed(1);
-  const why = r.code === 0 ? "pass" : r.code === -1 ? `timeout after ${o.toml.hooks.pre_push_timeout}s` : `exit ${r.code}`;
-  return { ok: r.code === 0, text: `${touchedLine}\npre-push: ${tests.length} touched test file(s) ${why} in ${secs}s, log ${log}` };
+  const r = await runTestProcess(o, { cmd, log: join(o.out, "pre-push.log"), timeoutS: o.toml.hooks.pre_push_timeout });
+  const why = r.timedOut ? `timeout after ${o.toml.hooks.pre_push_timeout}s` : r.code === 0 ? "pass" : `exit ${r.code}`;
+  return { ok: r.code === 0 && !r.timedOut, text: `${touchedLine}\npre-push: ${tests.length} touched test file(s) ${why} in ${r.secs}s, log ${r.log}` };
 }
 
-function noTestCheck(o: Opts, ranges: string[], sourceChanged: boolean, tests: number) {
-  if (!sourceChanged || tests) return check("tamper/no-tests-ran", []);
-  const reason = ranges.map((range) => noTestReason(run("git", ["log", "--format=%B", range], o.repo).out)).find(Boolean);
-  if (reason) return notedCheck("tamper/no-tests-ran", [], "", [bypassNote("tamper/no-tests-ran", "commit-msg", reason)]);
-  return check("tamper/no-tests-ran", [{ rule: "tamper/no-tests-ran", file: ".", line: 0, msg: "source changed, no test touched or found; add/refer a test or qg:no-test <reason>" }]);
+function pushNoTestCheck(o: Opts, ranges: string[], sourceChanged: boolean, tests: number) {
+  return noTestCheck(sourceChanged, tests, ranges.map((range) => run("git", ["log", "--format=%B", range], o.repo).out).join("\n"));
 }
-
-const noTestReason = (text: string) => /(?:^|\s)qg:no-test\s+(\S.*)$/m.exec(text)?.[1].trim() ?? "";
 
 function pushedChanges(o: Opts, ranges: string[]): Changes {
   const ch: Changes = new Map();
@@ -285,7 +230,7 @@ export async function runHook(args: Args) {
   const o = buildOpts({ ...args, values: { ...args.values, staged: name === "pre-commit" } });
   if (name === "pre-commit") return exitWith(partlyStaged(o) ?? (await runCheck(o)));
   if (name === "commit-msg") return commitMsg(o, file);
-  if (name === "pre-push") return exitWith(prePush(o, readFileSync(0, "utf8")));
+  if (name === "pre-push") return exitWith(await prePush(o, readFileSync(0, "utf8")));
   refuse(`unknown hook ${name}; expected pre-commit | commit-msg | pre-push`);
 }
 

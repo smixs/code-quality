@@ -57,6 +57,7 @@ function stats(o: Opts, fns: Fn[]) {
 const pct = (c: number | null) => (c === null ? "no data" : `${Math.round(c * 100)}%`);
 
 export function testsLine(t: Tests) {
+  if (t.scope === "touched") return `tests: touched run exit ${t.code}, failed ${t.failed ?? "unknown"}, lcov ${t.used ? t.lcov : "none"}`;
   if (t.skipped && t.lastRun) return `tests: not run (last full run ${t.lastRun.written}, ${t.lastRun.commit.slice(0, 8)})`;
   if (!t.used) return "tests: not run, no fresh lcov (CRAP and mean not judged; complexity only)";
   return `tests exit ${t.code}, failed ${t.failed ?? "unknown"}`;
@@ -85,23 +86,38 @@ export const checkNotices = (checks: Check[]) => checks.flatMap((c) => c.notices
 
 export const bypassNotices = (checks: Check[]) => checkNotices(checks).filter((line) => line.startsWith("note: bypass "));
 
+const NOT_REPO_WIDE = "n/a: touched coverage is not repo-wide";
+
 export function writeReport(o: Opts, a: Analysis, g: { checks: Check[]; drift: string[]; escalate: string[] }, name: string) {
-  const ch = churn(o.repo);
   const scope = a.docsOnly ? "docs-only" : `${o.scope.kind}${o.scope.rev ? ` ${o.scope.rev}` : ""}`;
   const L = [`# Quality report ${new Date().toISOString()}`, "", `repo ${o.repo} @ ${headLabel(o.repo)}, scope ${scope}, base ${o.base}${o.baseAuto ? " (detected)" : ""}, config ${o.cfgFile || "defaults"}, baseline ${o.baseline}`, testsLine(a.tests), ""];
   const bypasses = bypassNotices(g.checks);
   L.push("## Gate", ...g.checks.flatMap(checkLines), "", "## Bypasses", ...bypasses.map((line) => `- ${line}`), "", "## Escalate to reviewer (not wired yet, note only)", ...g.escalate.map((f) => `- ${f}`), "");
-  L.push("## Drift (unchanged functions worse than baseline, not gated)", ...g.drift.map((x) => `- ${x}`), "");
-  L.push("## Summary (no coverage data counts as 0%)", stats(o, a.fns), `unparsed files: ${a.failed.length ? a.failed.join(", ") : "none"}`, "");
-  L.push("## Worklist (CRAP x commits in 12 months)", ...worklist(a.fns, ch).map((w) => `- ${w.action}: ${w.f.file}:${w.f.start} ${w.f.name} (cc ${w.f.cc}, cov ${pct(w.f.cov)}, CRAP ${riskCrap(w.f).toFixed(1)})`), "");
-  L.push(`## Hotspots (commits x sum CRAP of risky functions: CRAP > ${RISKY_CRAP} or cc > ${RISKY_CC})`, "| file | commits | risky fns | sum CRAP | score |", "|---|---|---|---|---|", ...hotspots(a.fns, ch).map((h) => `| ${h.file} | ${h.commits} | ${h.risky} | ${h.crap.toFixed(0)} | ${h.score.toFixed(0)} |`), "");
-  L.push("## Top 30 CRAP", ...[...a.fns].sort((x, y) => riskCrap(y) - riskCrap(x)).slice(0, 30).map((f) => `- ${riskCrap(f).toFixed(1)} cc ${f.cc} cov ${pct(f.cov)} ${f.file}:${f.start}-${f.end} ${f.name}`), "");
+  L.push(...(a.tests.scope === "touched" ? touchedSections(a) : repoWideSections(o, a, g.drift)));
   L.push(`## Dependencies (${npmSpec("dependency-cruiser", o.toml.tools)})`, ...depLines(a.deps), "", `## Dead code (${npmSpec("knip", o.toml.tools)}, full output in knip.json)`, ...knipLines(a.knip), "");
   const path = join(o.out, name);
   writeFileSync(path, L.join("\n"));
   writeFileSync(path.replace(/\.md$/, ".json"), JSON.stringify({ checks: g.checks, bypasses, escalate: g.escalate }, null, 1));
   return path;
 }
+
+function repoWideSections(o: Opts, a: Analysis, drift: string[]) {
+  const ch = churn(o.repo);
+  const L = ["## Drift (unchanged functions worse than baseline, not gated)", ...drift.map((x) => `- ${x}`), ""];
+  L.push("## Summary (no coverage data counts as 0%)", stats(o, a.fns), `unparsed files: ${a.failed.length ? a.failed.join(", ") : "none"}`, "");
+  L.push("## Worklist (CRAP x commits in 12 months)", ...worklist(a.fns, ch).map((w) => `- ${w.action}: ${w.f.file}:${w.f.start} ${w.f.name} (cc ${w.f.cc}, cov ${pct(w.f.cov)}, CRAP ${riskCrap(w.f).toFixed(1)})`), "");
+  L.push(`## Hotspots (commits x sum CRAP of risky functions: CRAP > ${RISKY_CRAP} or cc > ${RISKY_CC})`, "| file | commits | risky fns | sum CRAP | score |", "|---|---|---|---|---|", ...hotspots(a.fns, ch).map((h) => `| ${h.file} | ${h.commits} | ${h.risky} | ${h.crap.toFixed(0)} | ${h.score.toFixed(0)} |`), "");
+  L.push("## Top 30 CRAP", ...[...a.fns].sort((x, y) => riskCrap(y) - riskCrap(x)).slice(0, 30).map(fnLine), "");
+  return L;
+}
+
+// check --tests: the changed functions with the coverage of their touched tests; repo-wide sections n/a.
+function touchedSections(a: Analysis) {
+  const na = (title: string) => [`## ${title}`, NOT_REPO_WIDE, ""];
+  return ["## Changed functions (touched coverage)", ...a.fns.map(fnLine), `unparsed files: ${a.failed.length ? a.failed.join(", ") : "none"}`, "", ...na("Drift"), ...na("Summary"), ...na("Worklist"), ...na("Hotspots"), ...na("Top 30 CRAP")];
+}
+
+const fnLine = (f: Fn) => `- ${riskCrap(f).toFixed(1)} cc ${f.cc} cov ${pct(f.cov)} ${f.file}:${f.start}-${f.end} ${f.name}`;
 
 export function writeHookReport(o: Opts, source: string, checks: Check[]) {
   mkdirSync(o.out, { recursive: true });

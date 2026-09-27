@@ -23,15 +23,16 @@ type Debt = { deps: Deps | null; knip: Knip | null; tools: AdapterToolCheck[] };
 
 export type Analysis = ReturnType<typeof analyze>;
 
-export function analyze(o: Opts, mode: Coverage) {
+// supplied = tests already run in this process: the full run, or the touched run of check --tests.
+export function analyze(o: Opts, mode: Coverage, supplied?: Tests) {
   mkdirSync(o.out, { recursive: true });
   const ch = changes(o);
-  const tests = runTests(o, mode);
+  const tests = supplied ?? runTests(o, mode === "run" ? "fresh-or-none" : mode);
   const docsOnly = isDocsOnly(o, ch);
   if (docsOnly) return { ch, tests, fns: [], failed: [], checks: docsOnlyChecks(o, ch), deps: null, knip: null, adapterTools: [] as AdapterToolCheck[], adapterAudit: false, docsOnly };
   const all = sourceFiles(o);
-  // Without coverage the mean is unknown, so only changed files need a parse.
-  const files = tests.used ? all : all.filter((f) => ch.has(f));
+  // Without full coverage the mean is unknown, so only changed files need a parse.
+  const files = tests.used && tests.scope !== "touched" ? all : all.filter((f) => ch.has(f));
   const functions = functionsOf(o, files);
   const failed = functions.failed.filter((line) => !line.startsWith("not run:") && !line.startsWith("crap:"));
   const toolNotices = functions.failed.filter((line) => line.startsWith("not run:") || line.startsWith("crap:"));
@@ -39,11 +40,13 @@ export function analyze(o: Opts, mode: Coverage) {
   score(fns, tests, o.repo);
   const noDeps = o.flags["no-deps"] || !o.langs.some((item) => item.adapter.id === "ts");
   const adapterAudit = mode !== "fresh-or-none";
+  // check --tests ran the coverage itself: diff coverage blocks as in the full gate.
+  const strictCoverage = mode !== "fresh-or-none" || tests.scope === "touched";
   const adapterTools = projectAdapterChecks(o, adapterAudit);
   const checks = [
     notedCheck("crap/tools", [], "", toolNotices),
     tamperCheck(o, ch),
-    diffCoverageCheck(o, ch, tests, { lowCoverage: mode !== "fresh-or-none", missingFiles: mode !== "fresh-or-none" }),
+    diffCoverageCheck(o, ch, tests, { lowCoverage: strictCoverage, missingFiles: strictCoverage }),
     formCheck(o, ch, all),
     dupCheck(o, ch, all),
     astCheck(o, ch),
@@ -66,7 +69,7 @@ function projectAdapterChecks(o: Opts, includeAudit: boolean) {
 
 const DOC_ONLY = /\.(?:md|toml|json|ya?ml)$/i;
 
-function isDocsOnly(o: Opts, ch: Changes) {
+export function isDocsOnly(o: Opts, ch: Changes) {
   return o.scope.kind !== "all" && ch.size > 0 && [...ch.keys()].every((file) => DOC_ONLY.test(file) && !inProjectDirs(o.dirs, file));
 }
 
@@ -116,7 +119,7 @@ function gateFunctions(o: Opts, a: Analysis, base: Baseline | null) {
   const drift: string[] = [];
   for (const f of a.fns) {
     if (isChanged(f, a.ch)) fails.push(...fnReasons(o, f, a.tests).map((msg) => ({ rule: "crap", file: f.file, line: f.start, msg: `${f.name}: ${msg}` })));
-    else pushDrift(drift, f, base?.functions[f.key]);
+    else if (a.tests.scope !== "touched") pushDrift(drift, f, base?.functions[f.key]);
   }
   return { fails, drift };
 }
@@ -133,7 +136,7 @@ export function meanCrap(fns: Fn[]) {
 // Mean CRAP is diagnostic: warn only when it is over the bar and grew beyond the noise tolerance.
 function meanDrift(o: Opts, a: Analysis, base: Baseline | null): string[] {
   const before = base?.mean;
-  if (!a.tests.used || before === undefined) return [];
+  if (!a.tests.used || a.tests.scope === "touched" || before === undefined) return [];
   const mean = meanCrap(a.fns);
   const t = o.toml.thresholds;
   if (mean <= t.max_mean_crap || mean <= before + t.mean_tolerance) return [];

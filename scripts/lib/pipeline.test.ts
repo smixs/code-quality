@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildOpts, DEFAULTS, loadToml, readArgs } from "./config.ts";
-import { runTests, type Tests } from "./crap.ts";
+import { runFullTests, type Tests } from "./crap.ts";
 import { changes, parseDiff } from "./diff.ts";
 import { gate, type Analysis } from "./gate.ts";
 import { PREV_KEY, pushRanges, redAnswer, runCheck } from "./hooks.ts";
@@ -23,6 +23,8 @@ const tmp = () => {
 };
 const testHome = join(tmp(), "code-quality-home");
 process.env.CODE_QUALITY_HOME = testHome;
+// The load wait has its own tests (accept.test.ts); here a busy machine must not stall the suite.
+process.env.QG_TEST_LOADAVG = "0";
 const testEnv = { ...process.env, CODE_QUALITY_HOME: testHome };
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
@@ -277,7 +279,7 @@ test_cmd = '(printf "TN:\\n" > "$QG_LCOV"; printf " 1 fail\\n"; exit 1)'
     sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
     const o = buildOpts(readArgs(["check", "--repo", repo, "--no-deps"]));
     mkdirSync(o.out, { recursive: true });
-    expect(runTests(o, "run").failed).toBe(1);
+    expect((await runFullTests(o)).failed).toBe(1);
     writeFileSync(join(repo, "README.md"), "after\n");
     const result = await runCheck(o);
     const head = sh(repo, "git rev-parse HEAD").stdout.trim().slice(0, 8);
@@ -344,7 +346,7 @@ test_cmd = '(printf "TN:\\n" > "$QG_LCOV"; printf " 1 fail\\n"; exit 1)'
     expect([result.ok, result.text]).toEqual([true, expect.stringContaining("baseline: missing, run --update-baseline; 1 cycles")]);
   }, 120_000);
 
-  test("failed test counts are summed across bun test buckets", () => {
+  test("failed test counts are summed across bun test buckets", async () => {
     const repo = tmp();
     mkdirSync(join(repo, "src"));
     writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
@@ -358,7 +360,7 @@ test_cmd = '(printf "TN:\\n" > "$QG_LCOV"; printf " 0 fail\\n 2 fail\\n"; exit 1
     sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
     const o = buildOpts(readArgs(["--repo", repo, "--no-deps"]));
     mkdirSync(o.out, { recursive: true });
-    const result = runTests(o, "run");
+    const result = await runFullTests(o);
     expect([result.code, result.failed]).toEqual([1, 2]);
   });
 

@@ -1,19 +1,20 @@
 // CRAP per function (A-exact-2): tests + lcov, function ranges from the eslint AST / lizard.
-import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, WHOLE } from "./diff.ts";
-import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot } from "./lang.ts";
+import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot, type Runner } from "./lang.ts";
 import { npmSpec, packageSpec, pinnedVersion, toolsDir } from "./tools.ts";
-import { git, gitPaths, lines, refuse, run, withoutRepoVars } from "./util.ts";
+import { runTestProcess } from "./testrun.ts";
+import { git, gitPaths, lines, refuse, run, shq } from "./util.ts";
 
 export type Range = { start: number; end: number; col: number; nested: [number, number][] };
 export type Fn = Range & { file: string; name: string; key: string; cc: number; cov: number | null; crap: number | null };
 export type Coverage = "run" | "reuse" | "fresh-or-none";
-export type Tests = { lcov: string; code: number; failed: number | null; skipped: boolean; red: boolean; used: boolean; lastRun?: { written: string; commit: string } };
+// scope "touched": in memory only, the coverage of `check --tests` read in the same process.
+export type Tests = { scope?: "touched"; lcov: string; code: number; failed: number | null; skipped: boolean; red: boolean; used: boolean; lastRun?: { written: string; commit: string } };
 
 export const TS_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 export const TS_SKIP = /(\.d\.ts$|\.(test|spec)\.|(^|\/)(fixtures|__tests__|node_modules|dist|build|\.scratch)\/)/;
@@ -21,6 +22,7 @@ const PY_SKIP = /((^|\/)tests?\/|(^|\/)test_[^/]*\.py$|_test\.py$|conftest\.py$|
 const FN_TYPES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
 const SKIP_KEYS = new Set(["parent", "loc", "range", "tokens", "comments"]);
 const LABEL = /^(.*?) has a complexity of (\d+)\./;
+// Failed-test counts in runner summaries: bun, pytest, node (spec, tap), vitest, the rest.
 const FAIL_COUNTS = [/^\s*(\d+) fail\b/gm, /^\s*(\d+) failed\b/gm, /^ℹ fail (\d+)\b/gm, /^# fail (\d+)\b/gm, /^Tests\s+(\d+) failed\b/gm, /(\d+) failed\b/g];
 // Fallback toolchain when the repo has no eslint; pinned in tools.ts like every other tool.
 const fallbackPkgs = (o: Opts) => ["eslint", "typescript-eslint-parser", "typescript"].map((id) => npmSpec(id, o.toml.tools));
@@ -38,10 +40,9 @@ const metaPath = (o: Opts) => join(o.out, "lcov.meta.json");
 const lcovPath = (o: Opts) => join(o.out, "lcov.info");
 const NO_TESTS: Tests = { lcov: "", code: 0, failed: null, skipped: true, red: false, used: false };
 
-export function runTests(o: Opts, mode: Coverage): Tests {
-  if (mode === "reuse") return reuseLcov(o);
-  if (mode === "fresh-or-none") return freshLcovOrLastRun(o);
-  return runFresh(o);
+// "run" goes through runFullTests: a test run is async.
+export function runTests(o: Opts, mode: Exclude<Coverage, "run">): Tests {
+  return mode === "reuse" ? reuseLcov(o) : freshLcovOrLastRun(o);
 }
 
 function freshLcovOrLastRun(o: Opts) {
@@ -50,14 +51,14 @@ function freshLcovOrLastRun(o: Opts) {
   return meta ? { ...NO_TESTS, lastRun: lastRun(meta) } : NO_TESTS;
 }
 
-function runFresh(o: Opts): Tests {
+export async function runFullTests(o: Opts): Promise<Tests> {
   rmSync(lcovPath(o), { force: true });
   const commit = git(o.repo, "rev-parse", "HEAD").trim();
   const fingerprint = sourceFingerprint(o, commit);
-  const env = withoutRepoVars({ ...process.env, QG_LCOV: lcovPath(o), QG_DIR: o.out });
-  const r = spawnSync("sh", ["-c", `${configuredTestCmd(o)} > "$QG_DIR/tests.log" 2>&1`], { cwd: o.repo, env, stdio: "inherit" });
+  const env = { ...process.env, QG_LCOV: lcovPath(o), QG_DIR: o.out };
+  const r = await runTestProcess(o, { cmd: configuredTestCmd(o), log: join(o.out, "tests.log"), timeoutS: Infinity, env });
   if (!existsSync(lcovPath(o))) throw new Error(`no coverage at ${lcovPath(o)}; see ${o.out}/tests.log`);
-  const meta = { commit, fingerprint, code: r.status ?? -1, failed: countFailed(readFileSync(join(o.out, "tests.log"), "utf8")), written: new Date().toISOString() };
+  const meta = { commit, fingerprint, code: r.code, failed: countFailed(readFileSync(join(o.out, "tests.log"), "utf8")), written: new Date().toISOString() };
   writeFileSync(metaPath(o), JSON.stringify(meta, null, 1));
   return testsFrom(lcovPath(o), meta, false);
 }
@@ -82,6 +83,81 @@ function countFailed(log: string) {
     if (counts.length) return counts.reduce((sum, n) => sum + n, 0);
   }
   return null;
+}
+
+// Ran and failed from the summary a runner prints (fixtures of real output: scripts/fixtures/summaries/).
+// node `ℹ tests N` / `ℹ fail K` (TAP `# tests` / `# fail`), bun `N pass` / `K fail`, vitest
+// `Tests  K failed | N passed (T)`, pytest `N passed, K failed in Xs`. Note: node counts a test file
+// without tests as one passing test.
+export type TestSummary = { ran: number; failed: number } | { error: string };
+
+const lastNumber = (log: string, re: RegExp) => {
+  const hits = [...log.matchAll(re)];
+  return hits.length ? Number(hits[hits.length - 1][1]) : null;
+};
+const inLine = (line: string, word: string) => Number(new RegExp(`(\\d+) ${word}`).exec(line)?.[1] ?? 0);
+
+const SUMMARIES: Record<Runner, (log: string) => { ran: number; failed: number } | null> = {
+  node: (log) => {
+    const ran = lastNumber(log, /^ℹ tests (\d+)$/gm) ?? lastNumber(log, /^# tests (\d+)$/gm);
+    const failed = lastNumber(log, /^ℹ fail (\d+)$/gm) ?? lastNumber(log, /^# fail (\d+)$/gm);
+    return ran === null || failed === null ? null : { ran, failed };
+  },
+  bun: (log) => {
+    const pass = lastNumber(log, /^\s*(\d+) pass$/gm);
+    const failed = lastNumber(log, /^\s*(\d+) fail$/gm);
+    if (pass === null || failed === null) return null;
+    return { ran: lastNumber(log, /^Ran (\d+) tests? across/gm) ?? pass + failed, failed };
+  },
+  vitest: (log) => {
+    const line = /^\s*Tests\s+(.+)$/m.exec(log)?.[1].trim();
+    if (!line) return null;
+    if (line.startsWith("no tests")) return { ran: 0, failed: 0 };
+    return /\(\d+\)/.test(line) ? { ran: inLine(line, "passed") + inLine(line, "failed"), failed: inLine(line, "failed") } : null;
+  },
+  py: (log) => {
+    const lines = [...log.matchAll(/^[= ]*(no tests ran|(?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b/gm)];
+    const line = lines[lines.length - 1]?.[1];
+    if (!line) return null;
+    const failed = inLine(line, "failed") + inLine(line, "errors?");
+    return { ran: inLine(line, "passed") + failed, failed };
+  },
+};
+
+export function parseTestSummary(runner: Runner, log: string): TestSummary {
+  const counts = SUMMARIES[runner](log.replace(/\x1b\[[0-9;]*m/g, ""));
+  return counts ?? { error: `no ${runner === "py" ? "pytest" : runner} test summary in the log` };
+}
+
+// check --tests: the touched tests with coverage into a private <out_dir>/touched/run-<pid>-<random>/,
+// never the full lcov or its meta; two acceptance runs at once never read each other's files.
+export async function runTouchedCoverage(o: Opts, tests: string[], cmd: string) {
+  const dir = join(o.out, "touched", `run-${process.pid}-${randomBytes(4).toString("hex")}`);
+  const lcov = join(dir, "lcov.info");
+  mkdirSync(dir, { recursive: true });
+  const env = { ...process.env, QG_LCOV: lcov, QG_DIR: dir };
+  const r = await runTestProcess(o, { cmd: cmd.replaceAll("{files}", tests.map(shq).join(" ")), log: join(dir, "tests.log"), timeoutS: Number(o.toml.tests.touched_timeout_s), env });
+  const failed = countFailed(readText(r.log));
+  const valid = !r.timedOut && validLcov(lcov);
+  const result: Tests = { scope: "touched", lcov, code: r.code, failed, skipped: false, red: r.code !== 0 || (failed ?? 0) > 0, used: valid };
+  return { run: r, tests: result, dir };
+}
+
+// Valid = readable, with at least one SF record that has DA lines.
+function validLcov(path: string) {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return false;
+  }
+  let file = false;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("SF:")) file = true;
+    else if (line.startsWith("end_of_record")) file = false;
+    else if (file && /^DA:\d+,\d+/.test(line)) return true;
+  }
+  return false;
 }
 
 function readMeta(o: Opts): TestMeta | null {

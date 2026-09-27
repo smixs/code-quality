@@ -4,12 +4,13 @@
 //
 //   quality.ts [flags]                    full gate: tests with coverage + every check (minutes)
 //   quality.ts check [--staged|--since R|--all]   deterministic gate on the change (seconds)
+//   quality.ts check --since R --tests    acceptance: the change's touched tests with coverage, then the gate
 //   quality.ts hook pre-commit|commit-msg <file>|pre-push   called by git-hooks/*
 //   quality.ts install-hooks <repo> | uninstall-hooks <repo>
 //   quality.ts install-grok-hooks | uninstall-grok-hooks
 //   quality.ts agent-stop                 Stop hook contract (stdin JSON -> stdout JSON)
 import { type Args, buildOpts, readArgs, repoConfigFile } from "./lib/config.ts";
-import type { Coverage } from "./lib/crap.ts";
+import { type Coverage, runFullTests } from "./lib/crap.ts";
 import { analyze, gate, writeBaseline } from "./lib/gate.ts";
 import { agentStop, installHooks, runCheck, runHook, uninstallHooks, updatePluginRoot } from "./lib/hooks.ts";
 import { guardBash } from "./lib/guard-bash.ts";
@@ -17,10 +18,10 @@ import { installGrokHooks, uninstallGrokHooks } from "./lib/grok-hooks.ts";
 import { checkNotices, churn, failCount, testsLine, verdictText, worklist, writeReport } from "./lib/report.ts";
 import { riskCrap } from "./lib/crap.ts";
 
-function full(args: Args) {
+async function full(args: Args) {
   const o = buildOpts({ ...args, values: { ...args.values, all: true } });
   const mode: Coverage = o.flags["skip-tests"] ? "reuse" : "run";
-  const a = analyze(o, mode);
+  const a = analyze(o, mode, mode === "run" ? await runFullTests(o) : undefined);
   const g = gate(o, a);
   const blocked = o.flags["update-baseline"] ? writeBaseline(o, a) : [];
   const report = writeReport(o, a, g, "report.md");
@@ -63,7 +64,7 @@ async function main() {
   updatePluginRoot();
   const args = readArgs();
   const cmd = args.positionals[0];
-  if (!cmd) return full(args);
+  if (!cmd) return await full(args);
   const fn = COMMANDS[cmd];
   if (!fn) throw new Error(`unknown command ${cmd}; expected ${Object.keys(COMMANDS).join(" | ")} or no command for the full gate`);
   await fn(args);

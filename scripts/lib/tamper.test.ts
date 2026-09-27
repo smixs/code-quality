@@ -11,6 +11,8 @@ import { prePush, touchedTests } from "./hooks.ts";
 import { tamperCheck } from "./tamper.ts";
 
 const dirs: string[] = [];
+// The load wait has its own tests (accept.test.ts); here a busy machine must not stall pre-push runs.
+process.env.QG_TEST_LOADAVG = "0";
 
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
@@ -521,41 +523,41 @@ allow = ["anything"]
 });
 
 describe("tamper/no-tests-ran", () => {
-  function push(repo: string, before: string) {
+  async function push(repo: string, before: string) {
     const head = git(repo, "rev-parse", "HEAD");
     return prePush(buildOpts(readArgs(["--repo", repo, "--no-deps"])), `refs/heads/main ${head} refs/heads/main ${before}\n`);
   }
 
-  test("blocks pushed source with no touched or adjacent test", () => {
+  test("blocks pushed source with no touched or adjacent test", async () => {
     const repo = tsRepo({ "src/value.ts": "export const value = 1;\n" });
     const before = git(repo, "rev-parse", "HEAD");
     write(repo, "src/value.ts", "export const value = 2;\n");
     commit(repo, "change value");
-    const result = push(repo, before);
+    const result = await push(repo, before);
     expect([result.ok, result.text.includes("tamper/no-tests-ran")]).toEqual([false, true]);
   });
 
-  test("accepts a pushed commit with a reason for no test", () => {
+  test("accepts a pushed commit with a reason for no test", async () => {
     const repo = tsRepo({ "src/value.ts": "export const value = 1;\n" });
     const before = git(repo, "rev-parse", "HEAD");
     write(repo, "src/value.ts", "export const value = 2;\n");
     commit(repo, ["qg:no", "-test generated constant only"].join(""));
-    const result = push(repo, before);
+    const result = await push(repo, before);
     expect([result.ok, result.text.includes("note: bypass tamper/no-tests-ran commit-msg generated constant only")]).toEqual([true, true]);
     const report = JSON.parse(readFileSync(join(repo, ".scratch/quality/check.json"), "utf8"));
     expect(report.bypasses).toEqual(["note: bypass tamper/no-tests-ran commit-msg generated constant only"]);
     expect(readFileSync(join(repo, ".scratch/quality/check.md"), "utf8")).toContain("## Bypasses");
   });
 
-  test("rejects qg:no-test without a non-empty reason", () => {
+  test("rejects qg:no-test without a non-empty reason", async () => {
     const repo = tsRepo({ "src/value.ts": "export const value = 1;\n" });
     const before = git(repo, "rev-parse", "HEAD");
     write(repo, "src/value.ts", "export const value = 2;\n");
     commit(repo, "qg:no-test");
-    expect(push(repo, before).ok).toBe(false);
+    expect((await push(repo, before)).ok).toBe(false);
   });
 
-  test("runs a test that imports the changed source even when its name differs", () => {
+  test("runs a test that imports the changed source even when its name differs", async () => {
     const repo = tsRepo({
       "src/value.ts": "export const value = () => 1;\n",
       "src/value.test.ts": 'import { expect, test } from "bun:test";\nimport { value } from "./value.ts";\ntest("current", () => expect(value()).toBe(2));\n',
@@ -566,7 +568,7 @@ describe("tamper/no-tests-ran", () => {
     const before = git(repo, "rev-parse", "HEAD");
     write(repo, "src/value.ts", "export const value = () => 2;\n");
     commit(repo, "change value");
-    const result = push(repo, before);
+    const result = await push(repo, before);
     expect([result.ok, result.text.includes("touched tests: 1 by name, 1 by import"), result.text.includes("exit 1")]).toEqual([false, true, true]);
   });
 
@@ -583,7 +585,7 @@ describe("tamper/no-tests-ran", () => {
     expect(touchedTests(opts(repo), ["src/value.ts"])).toEqual(["tests/a.test.ts", "tests/b.test.ts", "tests/c.test.ts"]);
   });
 
-  test("checks tamper per pushed commit so a standalone baseline is a note", () => {
+  test("checks tamper per pushed commit so a standalone baseline is a note", async () => {
     const repo = tsRepo({ "src/value.ts": "export const value = 1;\n", "src/value.test.ts": 'test("value", () => {});\n' });
     write(repo, ".scratch/quality/baseline.json", "{}\n");
     git(repo, "add", "-f", ".scratch/quality/baseline.json");
@@ -595,7 +597,7 @@ describe("tamper/no-tests-ran", () => {
     write(repo, "src/value.ts", "export const value = 2;\n");
     write(repo, "src/value.test.ts", 'import { test } from "node:test";\ntest("value", () => {});\n');
     commit(repo, "source and test");
-    const separate = push(repo, before);
+    const separate = await push(repo, before);
     expect([separate.ok, separate.text.includes("note: tamper/baseline-touched")]).toEqual([true, true]);
 
     const mixed = tsRepo({ "src/value.ts": "export const value = 1;\n", "src/value.test.ts": 'import { test } from "node:test";\ntest("value", () => {});\n' });
@@ -609,7 +611,7 @@ describe("tamper/no-tests-ran", () => {
     git(mixed, "add", "-A");
     git(mixed, "add", "-f", ".scratch/quality/baseline.json");
     git(mixed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "mixed");
-    expect(push(mixed, mixedBefore).text).toContain("tamper/baseline-touched");
+    expect((await push(mixed, mixedBefore)).text).toContain("tamper/baseline-touched");
   });
 });
 
