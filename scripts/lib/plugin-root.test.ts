@@ -47,4 +47,3 @@ describe("machine hooks follow the agent's copy", () => {
     }
   }, 60_000);
 });
-
