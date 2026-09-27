@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFile
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { type Args, buildOpts, type Opts } from "./config.ts";
 import { parseTestSummary } from "./crap.ts";
-import { isTestFile, mutantTestCommand, type Runner, testRunner } from "./lang.ts";
+import { isTestFile, mutantTestCommand, type Runner, RUNNERS, testRunner } from "./lang.ts";
 import { waitForLoad } from "./load.ts";
 import { type RunResult, startTestRun, type TestRun } from "./testrun.ts";
 import { ACCEPTANCE, touchedTestSelection } from "./touched.ts";
@@ -85,7 +85,6 @@ function prepare(o: Opts, input: MutantInput): Plan {
 }
 
 // The adapter's command prints its runner's summary; a custom mutant_cmd may print any known one.
-const RUNNERS: Runner[] = ["node", "bun", "vitest", "py"];
 function summaryRunners(detected: Runner | null, custom: boolean) {
   if (!custom) return detected ? [detected] : [];
   return detected ? [detected, ...RUNNERS.filter((runner) => runner !== detected)] : RUNNERS;

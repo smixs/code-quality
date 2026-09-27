@@ -100,6 +100,14 @@ describe("mutant outcomes", () => {
     expect([r.status, r.stdout.trim()]).toEqual([0, "MUTANT KILLED: 1 failing test(s) in src/calc.test.ts"]);
   }, 60_000);
 
+  test("bun output in two buckets: the failures of both are summed, KILLED", () => {
+    const buckets = 'printf " 2 pass\\nRan 4 tests across 2 files.\\n 2 fail\\n 0 fail\\n"; exit 1';
+    const green = 'printf " 2 pass\\n 0 fail\\nRan 2 tests across 1 file.\\n"; : {files}';
+    const repo = calcRepo(`mutant_cmd = 'if [ -f ${OUT}/pre.done ]; then ${buckets}; fi; touch ${OUT}/pre.done; ${green}'`);
+    const r = mutant(repo, ...KILLS);
+    expect([r.status, r.stdout.trim()]).toEqual([0, "MUTANT KILLED: 2 failing test(s) in src/calc.test.ts"]);
+  }, 60_000);
+
   test("a language without a file-aware test command is MUTANT ERROR unless [tests] mutant_cmd", () => {
     const repo = nodeRepo({ "go.mod": "module example.test/m\n", "src/calc.go": "package calc\nfunc Add(a, b int) int { return a + b }\n" }, "", false);
     write(repo, ".quality.toml", read(repo, ".quality.toml").replace('language = "ts"', 'language = "go"'));

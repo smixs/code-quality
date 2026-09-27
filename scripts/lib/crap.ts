@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { Opts } from "./config.ts";
 import { type Changes, WHOLE } from "./diff.ts";
-import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot, type Runner } from "./lang.ts";
+import { adapterForFile, defaultTestCommand, rootForFile, type LanguageRoot, type Runner, RUNNERS } from "./lang.ts";
 import { npmSpec, packageSpec, pinnedVersion, toolsDir } from "./tools.ts";
 import { runTestProcess } from "./testrun.ts";
 import { git, gitPaths, lines, refuse, run, shq } from "./util.ts";
@@ -22,8 +22,8 @@ const PY_SKIP = /((^|\/)tests?\/|(^|\/)test_[^/]*\.py$|_test\.py$|conftest\.py$|
 const FN_TYPES = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
 const SKIP_KEYS = new Set(["parent", "loc", "range", "tokens", "comments"]);
 const LABEL = /^(.*?) has a complexity of (\d+)\./;
-// Failed-test counts in runner summaries: bun, pytest, node (spec, tap), vitest, the rest.
-const FAIL_COUNTS = [/^\s*(\d+) fail\b/gm, /^\s*(\d+) failed\b/gm, /^ℹ fail (\d+)\b/gm, /^# fail (\d+)\b/gm, /^Tests\s+(\d+) failed\b/gm, /(\d+) failed\b/g];
+// Failed tests of a runner outside node, bun, vitest and pytest (the full gate of other languages).
+const OTHER_FAILED = /(\d+) failed\b/g;
 // Fallback toolchain when the repo has no eslint; pinned in tools.ts like every other tool.
 const fallbackPkgs = (o: Opts) => ["eslint", "typescript-eslint-parser", "typescript"].map((id) => npmSpec(id, o.toml.tools));
 
@@ -77,50 +77,53 @@ const testsFrom = (lcov: string, m: TestMeta, skipped: boolean): Tests => ({
   lastRun: lastRun(m),
 });
 
+// The failed count for the report: the known runner summaries through parseTestSummary, then the
+// plain "N failed" of other runners.
 function countFailed(log: string) {
-  for (const re of FAIL_COUNTS) {
-    const counts = [...log.matchAll(re)].map((m) => Number(m[1]));
-    if (counts.length) return counts.reduce((sum, n) => sum + n, 0);
+  for (const runner of RUNNERS) {
+    const summary = parseTestSummary(runner, log);
+    if (!("error" in summary)) return summary.failed;
   }
-  return null;
+  return total(log, OTHER_FAILED);
 }
 
 // Ran and failed from the summary a runner prints (fixtures of real output: scripts/fixtures/summaries/).
 // node `ℹ tests N` / `ℹ fail K` (TAP `# tests` / `# fail`), bun `N pass` / `K fail`, vitest
 // `Tests  K failed | N passed (T)`, pytest `N passed, K failed in Xs`. Note: node counts a test file
-// without tests as one passing test.
+// without tests as one passing test. A run that prints several summaries (buckets) is their sum.
 export type TestSummary = { ran: number; failed: number } | { error: string };
 
-const lastNumber = (log: string, re: RegExp) => {
+// The sum of every match; null when there is none.
+const total = (log: string, re: RegExp) => {
   const hits = [...log.matchAll(re)];
-  return hits.length ? Number(hits[hits.length - 1][1]) : null;
+  return hits.length ? hits.reduce((sum, hit) => sum + Number(hit[1]), 0) : null;
 };
 const inLine = (line: string, word: string) => Number(new RegExp(`(\\d+) ${word}`).exec(line)?.[1] ?? 0);
 
 const SUMMARIES: Record<Runner, (log: string) => { ran: number; failed: number } | null> = {
   node: (log) => {
-    const ran = lastNumber(log, /^ℹ tests (\d+)$/gm) ?? lastNumber(log, /^# tests (\d+)$/gm);
-    const failed = lastNumber(log, /^ℹ fail (\d+)$/gm) ?? lastNumber(log, /^# fail (\d+)$/gm);
+    const ran = total(log, /^ℹ tests (\d+)$/gm) ?? total(log, /^# tests (\d+)$/gm);
+    const failed = total(log, /^ℹ fail (\d+)$/gm) ?? total(log, /^# fail (\d+)$/gm);
     return ran === null || failed === null ? null : { ran, failed };
   },
   bun: (log) => {
-    const pass = lastNumber(log, /^\s*(\d+) pass$/gm);
-    const failed = lastNumber(log, /^\s*(\d+) fail$/gm);
-    if (pass === null || failed === null) return null;
-    return { ran: lastNumber(log, /^Ran (\d+) tests? across/gm) ?? pass + failed, failed };
+    const pass = total(log, /^\s*(\d+) pass$/gm);
+    const failed = total(log, /^\s*(\d+) fail$/gm);
+    if (pass === null && failed === null) return null;
+    return { ran: total(log, /^Ran (\d+) tests? across/gm) ?? (pass ?? 0) + (failed ?? 0), failed: failed ?? 0 };
   },
   vitest: (log) => {
-    const line = /^\s*Tests\s+(.+)$/m.exec(log)?.[1].trim();
-    if (!line) return null;
-    if (line.startsWith("no tests")) return { ran: 0, failed: 0 };
-    return /\(\d+\)/.test(line) ? { ran: inLine(line, "passed") + inLine(line, "failed"), failed: inLine(line, "failed") } : null;
+    const lines = [...log.matchAll(/^\s*Tests\s+(.+)$/gm)].map((hit) => hit[1].trim()).filter((line) => line.startsWith("no tests") || /\(\d+\)/.test(line));
+    if (!lines.length) return null;
+    return lines.reduce((sum, line) => ({ ran: sum.ran + inLine(line, "passed") + inLine(line, "failed"), failed: sum.failed + inLine(line, "failed") }), { ran: 0, failed: 0 });
   },
   py: (log) => {
-    const lines = [...log.matchAll(/^[= ]*(no tests ran|(?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b/gm)];
-    const line = lines[lines.length - 1]?.[1];
-    if (!line) return null;
-    const failed = inLine(line, "failed") + inLine(line, "errors?");
-    return { ran: inLine(line, "passed") + failed, failed };
+    const lines = [...log.matchAll(/^[= ]*(no tests ran|(?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b/gm)].map((hit) => hit[1]);
+    if (!lines.length) return null;
+    return lines.reduce((sum, line) => {
+      const failed = inLine(line, "failed") + inLine(line, "errors?");
+      return { ran: sum.ran + inLine(line, "passed") + failed, failed: sum.failed + failed };
+    }, { ran: 0, failed: 0 });
   },
 };
 

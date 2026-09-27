@@ -98,6 +98,7 @@ const VITEST_TOUCHED_COVERAGE = 'npx vitest run {files} --coverage.enabled --cov
 const PY_TOUCHED_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV" {files}';
 
 export type Runner = "node" | "bun" | "vitest" | "py";
+export const RUNNERS: Runner[] = ["node", "bun", "vitest", "py"];
 
 function runnerOf(repo: string, lang: string, readPackage: (path: string) => string): Runner {
   if (lang === "py") return "py";

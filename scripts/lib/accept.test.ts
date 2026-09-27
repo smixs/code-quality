@@ -325,6 +325,11 @@ describe("runner summaries", () => {
     expect(tracked).toEqual(expected.map(([name]) => `scripts/fixtures/summaries/${name}.log`).sort());
   });
 
+  test("buckets of one run are summed (bun prints one summary per bucket)", () => {
+    expect(parseTestSummary("bun", " 2 pass\nRan 4 tests across 2 files.\n 2 fail\n 0 fail\n")).toEqual({ ran: 4, failed: 2 });
+    expect(parseTestSummary("node", "ℹ tests 2\nℹ fail 1\nℹ tests 3\nℹ fail 0\n")).toEqual({ ran: 5, failed: 1 });
+  });
+
   test("a log without the runner's summary is an error, not zero", () => {
     expect(parseTestSummary("node", "hello\n")).toEqual({ error: "no node test summary in the log" });
     expect(parseTestSummary("py", readFileSync(join(FIXTURES, "node-pass.log"), "utf8"))).toEqual({ error: "no pytest test summary in the log" });
