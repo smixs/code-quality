@@ -83,19 +83,26 @@ const tool = (name: string, command: string, install: string, format = "json"): 
 // Every default test command lives here; no runner name is written anywhere else.
 const DEFAULT_PRE_PUSH = "node --test {files}";
 const PY_PRE_PUSH = 'uv run --with pytest pytest -q {files}';
-const NODE_TEST_COVERAGE = "node --test --experimental-test-coverage --test-coverage-exclude='**/*.test.*' --test-reporter=lcov --test-reporter-destination=\"$QG_LCOV\" --test-reporter=spec --test-reporter-destination=stdout";
-const BUN_TEST_COVERAGE = 'bun test scripts/ --coverage --coverage-reporter=lcov --coverage-dir="$QG_DIR/bun" && cp "$QG_DIR/bun/lcov.info" "$QG_LCOV"';
-const VITEST_COVERAGE = 'npx vitest run --coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory="$QG_DIR/vitest" && cp "$QG_DIR/vitest/lcov.info" "$QG_LCOV"';
-const PY_TEST_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV"';
+// The runner writes its report under $QG_DIR (a stale one removed first), then the report is appended
+// to $QG_LCOV: records the tests' child processes appended stay. The exit code is the tests'.
+const appended = (run: string, report: string) => `rm -f "$QG_DIR/${report}"; ${run}; code=$?; [ ! -f "$QG_DIR/${report}" ] || cat "$QG_DIR/${report}" >> "$QG_LCOV"; exit $code`;
+const NODE_RUN = "node --test --experimental-test-coverage --test-coverage-exclude='**/*.test.*' --test-reporter=lcov --test-reporter-destination=\"$QG_DIR/node.lcov\" --test-reporter=spec --test-reporter-destination=stdout";
+const BUN_RUN = (files: string) => `bun test ${files} --coverage --coverage-reporter=lcov --coverage-dir="$QG_DIR/bun"`;
+const VITEST_RUN = (files: string) => `npx vitest run ${files}--coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory="$QG_DIR/vitest"`;
+const PY_RUN = 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_DIR/py.lcov"';
+const NODE_TEST_COVERAGE = appended(NODE_RUN, "node.lcov");
+const BUN_TEST_COVERAGE = appended(BUN_RUN("scripts/"), "bun/lcov.info");
+const VITEST_COVERAGE = appended(VITEST_RUN(""), "vitest/lcov.info");
+const PY_TEST_COVERAGE = appended(PY_RUN, "py.lcov");
 
 export const prePushTestCommand = (adapter?: LanguageAdapter) => adapter?.prePushTest || DEFAULT_PRE_PUSH;
 
 // File-aware commands, {files} = the test list: coverage of the touched tests for `check --tests`, and
 // the plain run for `mutant`. Only node, bun, vitest and pytest have them.
-const NODE_TOUCHED_COVERAGE = `${NODE_TEST_COVERAGE} {files}`;
-const BUN_TOUCHED_COVERAGE = 'bun test {files} --coverage --coverage-reporter=lcov --coverage-dir="$QG_DIR/bun" && cp "$QG_DIR/bun/lcov.info" "$QG_LCOV"';
-const VITEST_TOUCHED_COVERAGE = 'npx vitest run {files} --coverage.enabled --coverage.provider=v8 --coverage.reporter=lcov --coverage.reportsDirectory="$QG_DIR/vitest" && cp "$QG_DIR/vitest/lcov.info" "$QG_LCOV"';
-const PY_TOUCHED_COVERAGE = 'uv run --with pytest-cov pytest -q --cov=. --cov-report=lcov:"$QG_LCOV" {files}';
+const NODE_TOUCHED_COVERAGE = appended(`${NODE_RUN} {files}`, "node.lcov");
+const BUN_TOUCHED_COVERAGE = appended(BUN_RUN("{files}"), "bun/lcov.info");
+const VITEST_TOUCHED_COVERAGE = appended(VITEST_RUN("{files} "), "vitest/lcov.info");
+const PY_TOUCHED_COVERAGE = appended(`${PY_RUN} {files}`, "py.lcov");
 
 export type Runner = "node" | "bun" | "vitest" | "py";
 export const RUNNERS: Runner[] = ["node", "bun", "vitest", "py"];
