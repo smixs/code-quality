@@ -8,7 +8,7 @@ One brief per role. Fill in `<…>`, change nothing else. Every role writes evid
 Task: <one line>. Spec: <path>, version <N>; the ticket is only a frame, the spec wins.
 First copy the "Finish line" and "Failure table" sections verbatim into TASK.md as checkboxes.
 Worktree: <path>, branch <name> from <base SHA> (<origin/main or an integration SHA with its dependencies>). Dependencies: <per the card>.
-Build it all in one pass; checks at the end: touched tests, typecheck, lint, the gate on the change (<command from the card>).
+Build it all in one pass; checks at the end: touched tests, typecheck, lint, the gate on the change (<command from the card>). The last run is in a clean detached worktree at the SHA you hand in: files under .gitignore never reach the commit.
 Not allowed: weakening or deleting tests to get green; --no-verify; touching <do-not-touch>; inventing a mechanism the spec lacks (then BLOCKED with a question); heavy runs in parallel with someone else's.
 Stuck for more than an hour on one spot: BLOCKED with what you tried. Do not reinterpret the goal.
 After handing in, do not touch the candidate until the verdict.
