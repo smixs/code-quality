@@ -109,6 +109,8 @@ describe("check --since <rev> --tests", () => {
     ["garbage", `printf 'garbage\\n' > "$QG_LCOV"`],
     ["truncated", `printf 'TN:\\nSF:src/calc.ts\\nDA:1' > "$QG_LCOV"`],
     ["no DA lines", `printf 'TN:\\nSF:src/calc.ts\\nend_of_record\\n' > "$QG_LCOV"`],
+    ["a DA line with a junk tail", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,1\\nDA:2,1junk\\nDA:3,1\\nDA:4,1\\nend_of_record\\n' > "$QG_LCOV"`],
+    ["a DA line with a non-numeric count", `printf 'TN:\\nSF:src/calc.ts\\nDA:1,x\\nend_of_record\\n' > "$QG_LCOV"`],
   ];
   for (const [name, cmd] of invalid) {
     test(`exit 0 with invalid coverage (${name}) is tests: ERROR invalid coverage, exit 1`, () => {

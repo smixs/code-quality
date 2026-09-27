@@ -143,7 +143,10 @@ export async function runTouchedCoverage(o: Opts, tests: string[], cmd: string) 
   return { run: r, tests: result, dir };
 }
 
-// Valid = readable, with at least one SF record that has DA lines.
+// Valid = readable, every DA line whole (DA:<line>,<hits>[,<checksum>]), and at least one SF record
+// with DA lines. A junk tail would reach parseLcov as NaN hits.
+const DA_LINE = /^DA:\d+,\d+(?:,[^,\s]+)?$/;
+
 function validLcov(path: string) {
   let text: string;
   try {
@@ -152,12 +155,14 @@ function validLcov(path: string) {
     return false;
   }
   let file = false;
-  for (const line of text.split("\n")) {
+  let hits = false;
+  for (const line of text.split("\n").map((l) => l.trimEnd())) {
+    if (line.startsWith("DA:") && !DA_LINE.test(line)) return false;
     if (line.startsWith("SF:")) file = true;
     else if (line.startsWith("end_of_record")) file = false;
-    else if (file && /^DA:\d+,\d+/.test(line)) return true;
+    else if (file && line.startsWith("DA:")) hits = true;
   }
-  return false;
+  return hits;
 }
 
 function readMeta(o: Opts): TestMeta | null {
