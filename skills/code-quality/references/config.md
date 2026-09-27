@@ -73,7 +73,7 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   count, since a shared machine idles near its CPU count; `0` = no wait) and `load_wait_s` (600): before every test run (full gate, `check --tests`,
   pre-push, `mutant`) the gate waits while the 1-minute load average is above `max_load`, polling every
   10 s up to `load_wait_s`, then runs anyway with `note: tests/load ran at load X.X after Ns`.
-  `touched_timeout_s` (900) - `check --tests`; `mutant_timeout_s` (300) - each of the two `mutant`
+  `touched_timeout_s` (900) - `check --tests`; `mutant_timeout_s` (900) - each of the two `mutant`
   runs. A timeout kills the run's whole process group. `[hooks] pre_push_timeout` still bounds pre-push.
   The environment variable `QG_TEST_LOADAVG` replaces the load reading; it exists for the gate's own
   tests only.

@@ -77,6 +77,11 @@ describe("mutant outcomes", () => {
     expect([r.status, r.stdout.includes("MUTANT ERROR: original tests: cannot be read: no node, bun, vitest or pytest test summary in the log")]).toEqual([2, true]);
   }, 60_000);
 
+  test("mutant_timeout_s defaults to 900 s, as touched_timeout_s (a hub file's 576 tests ran 503 s with coverage)", () => {
+    const tests = buildOpts(readArgs(["mutant", "--repo", calcRepo()])).toml.tests;
+    expect([tests.mutant_timeout_s, tests.touched_timeout_s]).toEqual([900, 900]);
+  });
+
   test("a preflight over mutant_timeout_s is MUTANT ERROR, nothing written", () => {
     const repo = calcRepo("mutant_timeout_s = 2\nmutant_cmd = 'sleep 30; : {files}'");
     const before = sha(repo);

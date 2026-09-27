@@ -40,7 +40,7 @@ export const DEFAULTS = {
   // Every test run the gate starts waits while the 1-minute load is above max_load (0 = no wait). The
   // default is 2 x CPUs: a shared machine idles near its CPU count, a second heavy run still waits.
   // touched_cmd: coverage of `check --tests`; mutant_cmd: the tests of `mutant`. {files} = the test list.
-  tests: { touched_cmd: "", mutant_cmd: "", max_load: 2 * availableParallelism(), load_wait_s: 600, touched_timeout_s: 900, mutant_timeout_s: 300 },
+  tests: { touched_cmd: "", mutant_cmd: "", max_load: 2 * availableParallelism(), load_wait_s: 600, touched_timeout_s: 900, mutant_timeout_s: 900 },
   // Jev notes never block. Thresholds are advisory and can be tuned per repo.
   review: {
     jev: false,
