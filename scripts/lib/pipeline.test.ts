@@ -439,7 +439,7 @@ audit = false
 language = "ts"
 src = ["src"]
 base = "HEAD"
-test_cmd = '(printf "TN:\\n" > "$QG_LCOV")'
+test_cmd = '(printf "TN:\\nSF:src/value.ts\\nDA:1,1\\nend_of_record\\n" > "$QG_LCOV")'
 
 [security]
 gitleaks = false
