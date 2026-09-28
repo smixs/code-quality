@@ -9,12 +9,12 @@
 
 **Your AI agent made the tests green. Did it fix the code, or the tests?**
 
-A quality gate for coding agents: git hooks and Stop hooks that block test tampering and hold one complexity bar on every changed function. 12 languages, one config file, no server.
+A quality advisor for coding agents: git hooks and Stop hooks that raise a loud red flag on test tampering, secrets and skipped hooks, and hold one complexity bar on every changed function. They never block: the agent sees the evidence and decides. 12 languages, one config file, no server.
 
 <p>
   <a href="https://skills.sh/smixs/code-quality"><img src="https://skills.sh/b/smixs/code-quality?style=flat-square" alt="skills.sh installs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=flat-square" alt="MIT"></a>
-  <a href="scripts/"><img src="https://img.shields.io/badge/tests-404_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="404 tests"></a>
+  <a href="scripts/"><img src="https://img.shields.io/badge/tests-407_passing-22c55e?style=flat-square&logo=bun&logoColor=white" alt="407 tests"></a>
   <a href="https://docs.claude.com/en/docs/agents/agent-skills"><img src="https://img.shields.io/badge/Claude_Code-skill-D97757?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code skill"></a>
   <a href="hooks/hooks.json"><img src="https://img.shields.io/badge/OpenAI_Codex-Stop_hook-000000?style=flat-square&logo=openai&logoColor=white" alt="Codex"></a>
   <a href="adapters/pi.ts"><img src="https://img.shields.io/badge/pi-extension-6E56CF?style=flat-square" alt="pi"></a>
@@ -40,18 +40,30 @@ A quality gate for coding agents: git hooks and Stop hooks that block test tampe
 
 ![Two toll lanes: red barrier down, green barrier up](assets/hero.webp)
 
+## Advice, not a gate
+
+Nothing here stops the agent. No hook refuses a commit, a push, a shell command or the end of a turn. The plugin trusts the model the way a good reviewer trusts a colleague: it measures, shows its work and says plainly when something is dangerous. The agent decides, and says why.
+
+Dangerous moves are red flags, printed first in every output:
+
+```
+RED FLAG: tamper/test-deleted  tests/queue.test.ts:1  test file deleted -- a green run stops proving the code works; check: is the test change intended? restore it, or say why in the commit message
+```
+
+Red flags: a secret in the change or in the pushed history, a deleted, skipped or weakened test, a baseline refreshed with the code, red tests on push, and a git command that skips the hooks (`--no-verify`, `commit -n`, `core.hooksPath`). Everything else (complexity, CRAP, diff coverage, cycles, dead code, clones, glossary, AI attribution, Jev) is a finding or a note in the report.
+
 ## What's new in 1.3
 
 - **Accept a change by its own tests.** `check --since <base> --tests` runs every test that reaches the change through the project's imports, with coverage, and judges only the changed functions.
 - **Prove a test catches a bug.** `mutant` makes one exact mutation, runs the tests and restores the file byte for byte, even after Ctrl-C.
-- **The gate judges the pushed commit.** When a push has touched tests to run, pre-push refuses a commit that is not the checked-out one.
+- **The report is about the pushed commit.** When a push has touched tests to run, pre-push runs them only on the checked-out commit and says so otherwise.
 - **Calm on a shared machine.** Test runs wait for a busy machine, Ctrl-C kills the whole test group, and a copy run by hand no longer takes the machine's git hooks.
 
 Full notes: [releases](https://github.com/smixs/code-quality/releases).
 
 ## The cheap way out, caught
 
-| The agent | The gate |
+| The agent | The report |
 |---|---|
 | Marked the failing test `it.skip` | `tamper/test-skipped tests/queue.test.ts:12` |
 | Dropped two assertions | `tamper/assertion-weakened tests/queue.test.ts:48` |
@@ -60,7 +72,7 @@ Full notes: [releases](https://github.com/smixs/code-quality/releases).
 | Refreshed the baseline with the code | `tamper/baseline-touched baseline.json:1` |
 | Shipped 50 lines, 31 covered | `cov/diff: 62% (31/50 lines, minimum 80%)` |
 
-Deterministic. Exit code 1, file and line in the report. No model is asked for an opinion.
+Deterministic: file and line in the report, red flags first. No model is asked for an opinion, and the commit still goes through; the agent answers the flag.
 
 ## How it works
 
@@ -69,15 +81,18 @@ flowchart LR
     A[git hooks] --> Q
     B[Stop hook: Claude, Codex, pi, omp; Grok after global hook install] --> Q
     C[OpenCode idle notice] --> Q
-    Q[one script] --> D{new finding on a changed line?}
-    D -->|yes| F[GATE FAIL, agent gets one round to fix]
-    D -->|no| P[GATE PASS]
+    Q[one script] --> R[RED FLAG lines first: secrets, tampered tests, red tests on push, skipped hooks]
+    R --> D{new finding on a changed line?}
+    D -->|yes| F[FINDINGS, advice to the agent]
+    D -->|no| P[CLEAN]
+    F --> G[the commit, push or turn goes ahead; the agent decides]
+    P --> G
 ```
 
 - **One bar.** Cyclomatic complexity 10, CRAP 30, 80% coverage of added lines, no new cycles, no new dead code, no secrets.
-- **Old debt does not block.** A baseline snapshot keeps existing findings as debt. Only new findings on changed lines fail.
-- **Seconds, not minutes.** `check` runs in 3-19 s on a real repo. The full gate with tests and coverage is a manual run: a debt measurement, not a verdict on a change.
-- **Acceptance on the change.** `check --since <base> --tests` runs the change's touched tests with coverage and judges the change with it. `mutant` proves a test catches one exact bug and always restores the file.
+- **Old debt is not news.** A baseline snapshot keeps existing findings as debt. Only new findings on changed lines are reported.
+- **Seconds, not minutes.** `check` runs in 3-19 s on a real repo. The full run with tests and coverage is a manual one: a debt measurement, not a verdict on a change.
+- **Acceptance on the change.** `check --since <base> --tests` runs the change's touched tests with coverage and reports on the change with it. `check` exits 1 on findings so a script or CI can decide; no hook turns that into a stop. `mutant` proves a test catches one exact bug and always restores the file.
 - **Any language.** Complexity from lizard, coverage from lcov, adapters for TypeScript, Python, Go, Rust, Java, Kotlin, C#, Swift, PHP, Ruby, C/C++, Dart.
 
 ## Install
@@ -95,7 +110,7 @@ flowchart LR
 | OpenCode V2 | Add `"plugins": ["github:smixs/code-quality"]` to `opencode.json` |
 | Skill only | `npx skills add smixs/code-quality` (does not install hooks) |
 
-Claude and Codex load [Stop and PreToolUse hooks](hooks/hooks.json) from the plugin. Grok 1.0.40 did not dispatch plugin hooks in a live check (`total_hooks=0`); `install-grok-hooks` writes `~/.grok/hooks/code-quality.json` with both commands pointing to the current plugin root. Run it again after moving or updating that root; `bun scripts/quality.ts uninstall-grok-hooks` removes that file. `$GROK_HOME` overrides the Grok directory. pi and omp load the package extensions. OpenCode blocks the shell tool before a bypass and writes a session message on idle when the gate is red; its idle event cannot force another agent turn. OpenCode V1.18.32 reads the plugin's `config.skills` value but does not discover the skill from it. Add an explicit `"skills": ["./node_modules/code-quality/skills"]` entry to `opencode.json` when using a project Bun installation. In Git repositories with `.quality.toml`, `git commit --no-verify`, `git commit -n`, `git push --no-verify`, `git -c core.hooksPath=...` and `git config core.hooksPath` are blocked by default. Set `[hooks] block_bypass = false` in `.quality.toml` to disable this guard.
+Claude and Codex load [Stop, UserPromptSubmit and PreToolUse hooks](hooks/hooks.json) from the plugin. The Stop hook never holds the turn: the user sees the red flags at once, and the agent gets the full report once, with its next message (UserPromptSubmit). Grok 1.0.40 did not dispatch plugin hooks in a live check (`total_hooks=0`); `install-grok-hooks` writes `~/.grok/hooks/code-quality.json` with both commands pointing to the current plugin root; Grok drops UserPromptSubmit context, so there the Stop report reaches the user only. Run it again after moving or updating that root; `bun scripts/quality.ts uninstall-grok-hooks` removes that file. `$GROK_HOME` overrides the Grok directory. pi and omp load the package extensions: a red flag is added to the shell command's result, the Stop report goes to the next turn. OpenCode adds the red flag after the shell command and writes the Stop report into the session on idle without a reply. OpenCode V1.18.32 reads the plugin's `config.skills` value but does not discover the skill from it. Add an explicit `"skills": ["./node_modules/code-quality/skills"]` entry to `opencode.json` when using a project Bun installation. In Git repositories with `.quality.toml`, `git commit --no-verify`, `git commit -n`, `git push --no-verify`, `git -c core.hooksPath=...` and `git config core.hooksPath` run as asked and get a red flag next to their output. Set `[hooks] flag_bypass = false` in `.quality.toml` to silence it (`block_bypass`, the old name, is still read).
 
 To enable the plugin for a team repository, commit these project settings:
 
@@ -131,7 +146,7 @@ Five calibrated yes/no questions about added test hunks (a textual test, an unte
 weakened assertion, a mock that hides the change, a tautological property). It also asks whether each
 changed source hunk has a test in the same diff, whether the change implements the task spec
 (`[review] spec` or `QG_SPEC`) and, opt-in, UX and AI-agent question packs plus your own project
-questions. Notes only: Jev never changes the exit code. Two ways to connect, whichever key you have:
+questions. Notes only, like everything else here. Two ways to connect, whichever key you have:
 
 ```toml
 [review]                      # TypeSafe directly, key from console.typesafe.ai/keys
@@ -148,7 +163,7 @@ Details, the model pins and the curl for each: [Jev reference](skills/code-quali
 
 ## Docs
 
-- [Every rule, what blocks and what only notes](skills/code-quality/references/checks.md)
+- [Every rule, which ones are red flags and which are findings or notes](skills/code-quality/references/checks.md)
 - [Languages and adapters](skills/code-quality/references/languages.md)
 - [Configure `.quality.toml` and hooks](skills/code-quality/references/config.md)
 - [Jev: an optional classifier for test and source hunks](skills/code-quality/references/jev.md)

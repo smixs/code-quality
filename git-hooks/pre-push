@@ -3,11 +3,17 @@
 # Both the gate and the repo's own pre-push (Git LFS uploads objects here) read the pushed refs on
 # stdin, so it is kept in a file and fed to each.
 here=$(dirname "$0")
-refs=$(mktemp) || exit 1
+refs=$(mktemp) || exec "$here/_chain" pre-push "$@"
 trap 'rm -f "$refs"' EXIT
 cat > "$refs"
-# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone.
+# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone;
+# with neither, no report and the repo's own hook still runs.
 root=$(cat "$here/../hooks-root" 2>/dev/null)
-[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root") || exit 2
-bun "$root/scripts/quality.ts" hook pre-push --repo "$(git rev-parse --show-toplevel)" < "$refs" || exit $?
+[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root" 2>/dev/null)
+if [ -f "$root/scripts/quality.ts" ]; then
+  bun "$root/scripts/quality.ts" hook pre-push --repo "$(git rev-parse --show-toplevel)" < "$refs"
+  # Advice never stops git; an interrupt (Ctrl-C, kill) still does.
+  code=$?
+  [ "$code" -gt 128 ] && exit "$code"
+fi
 "$here/_chain" pre-push "$@" < "$refs"

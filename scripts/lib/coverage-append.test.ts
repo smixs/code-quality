@@ -31,14 +31,14 @@ function touchedRepo(runner: "bun" | "node", pass = true) {
 }
 
 describe("built-in coverage commands append to $QG_LCOV", () => {
-  test("bun touched run: the record a test's child appended covers src/x.ts, GATE PASS", () => {
+  test("bun touched run: the record a test's child appended covers src/x.ts, CLEAN", () => {
     const r = checkTests(touchedRepo("bun"));
-    expect([r.status, r.stdout.includes("bun test"), r.stdout.includes("without lcov data"), /GATE PASS/.test(r.stdout)]).toEqual([0, true, false, true]);
+    expect([r.status, r.stdout.includes("bun test"), r.stdout.includes("without lcov data"), /^CLEAN$/m.test(r.stdout)]).toEqual([0, true, false, true]);
   }, 60_000);
 
-  test("node touched run: the child's record is kept, GATE PASS", () => {
+  test("node touched run: the child's record is kept, CLEAN", () => {
     const r = checkTests(touchedRepo("node"));
-    expect([r.status, r.stdout.includes("node --test"), r.stdout.includes("without lcov data"), /GATE PASS/.test(r.stdout)]).toEqual([0, true, false, true]);
+    expect([r.status, r.stdout.includes("node --test"), r.stdout.includes("without lcov data"), /^CLEAN$/m.test(r.stdout)]).toEqual([0, true, false, true]);
   }, 60_000);
 
   test("bun full gate (bun test scripts/): the child's record is in lcov.info", () => {
@@ -53,7 +53,7 @@ describe("built-in coverage commands append to $QG_LCOV", () => {
     expect([records(repo, "src/x.ts"), records(repo, "src/calc.ts")]).toEqual([1, 1]);
   }, 60_000);
 
-  test("pytest touched run (uv with pytest-cov): the child's record for src/x.py is kept, GATE PASS", () => {
+  test("pytest touched run (uv with pytest-cov): the child's record for src/x.py is kept, CLEAN", () => {
     const pyTest = `import subprocess\n\n\ndef test_child():\n    subprocess.run(["sh", "-c", ${JSON.stringify(appendLine("src/x.py").replaceAll("\\\\", "\\"))}], check=True)\n`;
     const repo = nodeRepo({ "src/x.py": "x = 1\n", "src/test_x.py": pyTest }, "", false);
     write(repo, ".quality.toml", TOML.replace('language = "ts"', 'language = "py"'));
@@ -61,7 +61,7 @@ describe("built-in coverage commands append to $QG_LCOV", () => {
     write(repo, "src/x.py", "x = 2\n");
     commit(repo);
     const r = checkTests(repo);
-    expect([r.status, r.stdout.includes("pytest"), r.stdout.includes("without lcov data"), /GATE PASS/.test(r.stdout)]).toEqual([0, true, false, true]);
+    expect([r.status, r.stdout.includes("pytest"), r.stdout.includes("without lcov data"), /^CLEAN$/m.test(r.stdout)]).toEqual([0, true, false, true]);
   }, 180_000);
 
   test("tests red: the exit code of the tests, tests/red, never exit 0 from the append step", () => {

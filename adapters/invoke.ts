@@ -20,8 +20,20 @@ export async function invoke(command: "agent-stop" | "guard-bash", input: object
   });
 }
 
-export function denied(result: Awaited<ReturnType<typeof invoke>>) {
-  return result.output?.hookSpecificOutput?.permissionDecision === "deny"
-    ? result.output.hookSpecificOutput.permissionDecisionReason
-    : result.code !== 0 ? `code-quality guard failed: ${result.error}` : "";
+// Nothing here blocks: a red flag is text for the agent, a failed call is a note, never a denial.
+export function flagged(result: Awaited<ReturnType<typeof invoke>>): string {
+  return result.output?.hookSpecificOutput?.additionalContext ?? "";
+}
+
+// The Stop note, asked for inline so the adapter hands it to its own next-turn channel.
+export async function stopNote(cwd: string, session: string) {
+  const result = await invoke("agent-stop", { cwd, session_id: session, deliver: "inline" }, cwd);
+  if (result.output?.note) return String(result.output.note);
+  return result.code !== 0 || !result.output ? `code-quality Stop failed (nothing was held): ${result.error}` : "";
+}
+
+// The red flag goes in front of the command's own output, so the agent reads it with the result.
+export async function flagResult(cwd: string, input: unknown, content: any[]) {
+  const flag = flagged(await invoke("guard-bash", { cwd, tool_name: "bash", tool_input: input }, cwd));
+  return flag ? { content: [{ type: "text", text: flag }, ...content] } : undefined;
 }

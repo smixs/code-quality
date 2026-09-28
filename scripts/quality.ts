@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
-// code-quality: one bar for every repo. CRAP per function (A-exact-2), deps, dead code, eslint form,
-// duplication, ast-grep rules, doc links, glossary, secrets. Config: <repo>/.quality.toml.
+// code-quality: one bar for every repo, as advice. CRAP per function (A-exact-2), deps, dead code,
+// eslint form, duplication, ast-grep rules, doc links, glossary, secrets. No hook stops the agent:
+// dangerous things are loud red flags, the rest are findings. Config: <repo>/.quality.toml.
 //
 //   quality.ts [flags]                    full gate: tests with coverage + every check (minutes)
 //   quality.ts check [--staged|--since R|--all]   deterministic gate on the change (seconds)
@@ -9,11 +10,13 @@
 //   quality.ts hook pre-commit|commit-msg <file>|pre-push   called by git-hooks/*
 //   quality.ts install-hooks <repo> | uninstall-hooks <repo>
 //   quality.ts install-grok-hooks | uninstall-grok-hooks
-//   quality.ts agent-stop                 Stop hook contract (stdin JSON -> stdout JSON)
+//   quality.ts agent-stop                 Stop hook contract (stdin JSON -> stdout JSON); never holds the turn
+//   quality.ts agent-notes                UserPromptSubmit: the queued Stop note, once
+//   quality.ts guard-bash                 PreToolUse: a red flag on a hook bypass; never denies
 import { type Args, buildOpts, readArgs, repoConfigFile } from "./lib/config.ts";
 import { type Coverage, runFullTests } from "./lib/crap.ts";
 import { analyze, gate, writeBaseline } from "./lib/gate.ts";
-import { agentStop, installHooks, runCheck, runHook, uninstallHooks, updatePluginRoot } from "./lib/hooks.ts";
+import { agentNotes, agentStop, installHooks, runCheck, runHook, uninstallHooks, updatePluginRoot } from "./lib/hooks.ts";
 import { mutantCmd } from "./lib/mutant.ts";
 import { guardBash } from "./lib/guard-bash.ts";
 import { installGrokHooks, uninstallGrokHooks } from "./lib/grok-hooks.ts";
@@ -62,6 +65,7 @@ const COMMANDS: Record<string, (a: Args) => void | Promise<void>> = {
   check: checkCmd,
   hook: runHook,
   "agent-stop": asAgent(agentStop),
+  "agent-notes": agentNotes,
   mutant: mutantCmd,
   "guard-bash": asAgent(guardBash),
   "install-hooks": (a) => installHooks(a.positionals[1]),

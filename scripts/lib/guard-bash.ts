@@ -1,7 +1,9 @@
-// Translate a shell tool call into the shared PreToolUse decision. This scans direct git commands;
+// Translate a shell tool call into the shared PreToolUse advice. This scans direct git commands;
 // it intentionally does not claim to interpret shell substitutions or wrapper scripts.
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { type Args, loadToml, repoConfigFile } from "./config.ts";
+import { redFlag } from "./report.ts";
 import { run } from "./util.ts";
 
 type Word = { value: string; quoted: boolean };
@@ -103,22 +105,37 @@ export function bypassReason(source: string): string {
   return "";
 }
 
-export function guardBash(_args: Args) {
-  const input = JSON.parse(readFileSync(0, "utf8"));
-  const command = input.tool_input?.command ?? input.toolInput?.command ?? input.tool_input?.cmd ?? input.toolInput?.cmd;
-  const cwd = input.cwd ?? process.cwd();
-  const tool = input.tool_name ?? input.toolName ?? "Bash";
-  if (typeof command !== "string" || !["Bash", "run_terminal_command", "bash", "exec_command"].includes(tool)) {
-    console.log("{}");
-    return;
-  }
+// A bypass is a red flag, never a denial: the agent sees it next to the command's output (Claude
+// Code, Codex and Grok read additionalContext; the user sees systemMessage) and decides.
+export function bypassFlag(reason: string) {
+  const danger = reason.includes("hooksPath") ? "the quality hooks stop running here, for every later commit and push" : "the quality hooks do not run for this commit or push, nothing checks it";
+  return redFlag(reason, danger, `is skipping them intended? run \`bun ${resolve(import.meta.dir, "../quality.ts")} check --staged\` (or --since <base>) yourself, and say why in the commit message`);
+}
+
+const SHELL_TOOLS = ["Bash", "run_terminal_command", "bash", "exec_command"];
+
+// The command of a shell tool call, "" for any other tool (snake_case from Claude Code and Codex,
+// camelCase from others; pi and omp pass `cmd` too).
+function shellCommand(input: any): string {
+  const toolInput = input.tool_input ?? input.toolInput ?? {};
+  const command = toolInput.command ?? toolInput.cmd;
+  return typeof command === "string" && SHELL_TOOLS.includes(input.tool_name ?? input.toolName ?? "Bash") ? command : "";
+}
+
+// The flag is on when the repo has a .quality.toml and neither flag_bypass nor its old name is false.
+function flagsBypass(cwd: string) {
   const top = run("git", ["rev-parse", "--show-toplevel"], cwd);
   const config = top.code === 0 ? repoConfigFile(top.out.trim()) : "";
-  if (!config) { console.log("{}"); return; }
-  const enabled = loadToml(config).hooks.block_bypass;
-  const reason = enabled ? bypassReason(command) : "";
-  if (!reason) { console.log("{}"); return; }
-  console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } }));
-  console.error(`code-quality: ${reason}`);
-  process.exit(2);
+  if (!config) return false;
+  const hooks = loadToml(config).hooks;
+  return hooks.flag_bypass && hooks.block_bypass;
+}
+
+export function guardBash(_args: Args) {
+  const input = JSON.parse(readFileSync(0, "utf8"));
+  const command = shellCommand(input);
+  const reason = command && flagsBypass(input.cwd ?? process.cwd()) ? bypassReason(command) : "";
+  if (!reason) return console.log("{}");
+  const flag = bypassFlag(reason);
+  console.log(JSON.stringify({ systemMessage: flag, hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: flag } }));
 }

@@ -1,5 +1,7 @@
 // git hooks (pre-commit, commit-msg, pre-push), hook install/uninstall and the agent Stop contract.
-// Every entry point runs the same analysis; vendors only differ in how they call this file.
+// Every entry point runs the same analysis; vendors only differ in how they call this file. No hook
+// stops the agent: red flags go first and loud, findings follow, the commit, push or stop goes ahead.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,8 +10,8 @@ import { runTests } from "./crap.ts";
 import { parseDiff, type Changes } from "./diff.ts";
 import { diffCoverageCheck } from "./diffcov.ts";
 import { acceptanceTests, type Lane } from "./accept.ts";
-import { adapterAuditGateChecks, analyze, gate } from "./gate.ts";
-import { checkNotices, failCount, testsLine, verdictText, writeHookReport, writeReport } from "./report.ts";
+import { adapterAuditGateChecks, type Analysis, analyze, gate } from "./gate.ts";
+import { checkNotices, failCount, isRedFlag, redFlag, redFlags, testsLine, verdictText, writeHookReport, writeReport } from "./report.ts";
 import { defaultJev, type JevDeps, jevNotes } from "./jev.ts";
 import { adapterById, prePushTestCommand } from "./lang.ts";
 import { runTestProcess } from "./testrun.ts";
@@ -79,7 +81,7 @@ const ZERO = /^0+$/;
 
 // ---- check: deterministic gate on the current change (seconds)
 
-// ok is decided by the deterministic checks only; Jev lines are notes.
+// ok = no deterministic finding (the exit code of `check`); Jev lines are notes. Red flags go first.
 // check --tests runs the touched tests first and the analysis reads their coverage in this process.
 export async function runCheck(o: Opts, jev: JevDeps = defaultJev()) {
   const lane = o.flags.tests === true ? await acceptanceTests(o) : null;
@@ -90,10 +92,13 @@ export async function runCheck(o: Opts, jev: JevDeps = defaultJev()) {
   const report = writeReport(o, a, g, "check.md");
   const notes = o.toml.review.jev ? await jevNotes(o, a.ch, jev) : [];
   const verdict = verdictText(g.checks, a, false);
-  const scope = a.docsOnly ? ["scope: docs-only"] : [];
-  const tests = lane ? lane.lines : [testsLine(a.tests)];
-  const text = [...tests, ...scope, verdict, ...checkNotices(g.checks), ...escalateLines(g.escalate), ...notes, ...llmLines(o), ...laneDir(lane), `report: ${report}`].join("\n");
+  const text = [...checkHead(g.checks, a, lane), verdict, ...checkNotices(g.checks), ...escalateLines(g.escalate), ...notes, ...llmLines(o), ...laneDir(lane), `report: ${report}`].join("\n");
   return { ok: failCount(g.checks) === 0, text, verdict };
+}
+
+// Red flags first, then what ran and on what scope.
+function checkHead(checks: Check[], a: Analysis, lane: Lane | null) {
+  return [...redFlags(checks), ...(lane ? lane.lines : [testsLine(a.tests)]), ...(a.docsOnly ? ["scope: docs-only"] : [])];
 }
 
 // The private run directory goes after the verdict; a failed run keeps it and says where.
@@ -104,32 +109,33 @@ function laneDir(lane: Lane | null) {
   return [];
 }
 
-// verdict = the deterministic red lines only; the Stop retry key is built from it, never from notes.
+// verdict = the deterministic lines only; the Stop "already shown" key is built from it, never from notes.
 export type Verdict = { ok: boolean; text: string; verdict?: string };
 
 const llmLines = (o: Opts) => (o.toml.review.llm ? ["note: [review] llm = true but the LLM reviewer is not wired yet; nothing ran"] : []);
 
 const escalateLines = (xs: string[]) => (xs.length ? [`note: reviewer paths touched (not wired yet): ${xs.slice(0, 10).join(", ")}`] : []);
 
-function exitWith(r: { ok: boolean; text: string }) {
-  console.log(r.text);
-  process.exit(r.ok ? 0 : 1);
+// A git hook prints its advice and lets git go on: exit 0 whatever it found.
+function advise(...text: string[]) {
+  console.log(text.filter(Boolean).join("\n"));
+  process.exit(0);
 }
 
 // ---- git hooks
 
-// The analysis reads the working tree, so a file with unstaged edits would be judged by the wrong text.
+// The analysis reads the working tree, so a file with unstaged edits is judged by its working-tree text.
 function partlyStaged(o: Opts) {
   const staged = new Set(lines(gitPaths(o.repo, "diff", "--cached", "--name-only")));
   const both = lines(gitPaths(o.repo, "diff", "--name-only")).filter((f) => staged.has(f));
-  if (!both.length) return null;
-  return { ok: false, text: `pre-commit: partly staged, the gate reads the working tree: ${both.slice(0, 10).join(", ")}\nstage the whole file, or: git stash push --keep-index; git commit; git stash pop` };
+  if (!both.length) return "";
+  return `note: partly staged, the report below reads the working tree, not the commit: ${both.slice(0, 10).join(", ")}`;
 }
 
 function commitMsg(o: Opts, file: string) {
   const found = commitMsgFindings(o, readFileSync(file, "utf8"));
-  if (found.length) console.error(`commit-msg: blocked\n${found.map(findingLine).join("\n")}`);
-  process.exit(found.length ? 1 : 0);
+  if (found.length) console.error(`commit-msg: note, the commit goes ahead\n${found.map(findingLine).join("\n")}`);
+  process.exit(0);
 }
 
 type Push = { ref: string; local: string; remote: string };
@@ -179,15 +185,19 @@ export async function prePush(o: Opts, stdin: string) {
   return finishPrePush(o, test, [...baseChecks, coverage]);
 }
 
-function finishPrePush(o: Opts, result: { ok: boolean; text: string }, checks: Check[]) {
+type PushTests = { ok: boolean; text: string; flag?: string };
+
+// Red flags first (red touched tests, tampered tests, secrets), then the rest; the push goes ahead.
+function finishPrePush(o: Opts, result: PushTests, checks: Check[]) {
   writeHookReport(o, "pre-push", checks);
   const text = checks.flatMap(checkOutput);
-  return { ok: result.ok && failCount(checks) === 0, text: [result.text, ...text].filter(Boolean).join("\n") };
+  const flags = [...(result.flag ? [result.flag] : []), ...redFlags(checks)];
+  return { ok: result.ok && failCount(checks) === 0, text: [...flags, result.text, ...text].filter(Boolean).join("\n") };
 }
 
 function checkOutput(item: Check) {
   if (item.error) return [`${item.name}: ERROR ${item.error}`];
-  if (item.findings.length) return item.findings.map(findingLine);
+  if (item.findings.length) return item.findings.filter((f) => !isRedFlag(f)).map(findingLine);
   return item.notices.length ? item.notices : item.note ? [item.note] : [];
 }
 
@@ -200,17 +210,19 @@ function treeProblem(o: Opts, pushed: Pushed[], tests: string[]) {
   const withFiles = pushed.map((p) => ({ ...p, files: lines(gitPaths(o.repo, "diff", "--name-only", p.range)) })).filter((p) => p.files.length);
   const other = withFiles.find((p) => git(o.repo, "rev-parse", `${p.local}^{commit}`).trim() !== head);
   const short = (sha: string) => git(o.repo, "rev-parse", "--short", sha).trim();
-  if (other) return `pre-push: pushing ${short(other.local)} (${other.ref}), this checkout is at ${short(head)}; touched tests run on the checked-out tree, push from a checkout of that commit`;
+  if (other) return `pre-push: touched tests not run: pushing ${short(other.local)} (${other.ref}), this checkout is at ${short(head)}; they run on the checked-out tree, push from a checkout of that commit to run them`;
   const paths = [...new Set([...withFiles.flatMap((p) => p.files), ...tests])];
   const dirty = lines(gitPaths(o.repo, "status", "--porcelain", "--untracked-files=all", "--", ...paths)).map((line) => line.slice(3));
-  return dirty.length ? `pre-push: uncommitted changes in files the touched tests read: ${dirty.slice(0, 10).join(", ")}; commit or stash them` : "";
+  return dirty.length ? `pre-push: touched tests not run: uncommitted changes in files they read: ${dirty.slice(0, 10).join(", ")}; commit or stash them to run the tests` : "";
 }
 
-async function runTouchedTests(o: Opts, tests: string[], touchedLine: string) {
+async function runTouchedTests(o: Opts, tests: string[], touchedLine: string): Promise<PushTests> {
   const cmd = prePushCmd(o).replace("{files}", tests.map(shq).join(" "));
   const r = await runTestProcess(o, { cmd, log: join(o.out, "pre-push.log"), timeoutS: o.toml.hooks.pre_push_timeout });
   const why = r.timedOut ? `timeout after ${o.toml.hooks.pre_push_timeout}s` : r.code === 0 ? "pass" : `exit ${r.code}`;
-  return { ok: r.code === 0 && !r.timedOut, text: `${touchedLine}\npre-push: ${tests.length} touched test file(s) ${why} in ${r.secs}s, log ${r.log}` };
+  const red = !r.timedOut && r.code !== 0;
+  const flag = red ? redFlag(`pushing with red tests: ${tests.length} touched test file(s) ${why}`, "the pushed commit breaks what its own tests check", `read ${r.log}; fix it, or say in the PR why red is expected`) : undefined;
+  return { ok: r.code === 0 && !r.timedOut, text: `${touchedLine}\npre-push: ${tests.length} touched test file(s) ${why} in ${r.secs}s, log ${r.log}`, flag };
 }
 
 function pushNoTestCheck(o: Opts, ranges: string[], sourceChanged: boolean, tests: number) {
@@ -253,9 +265,9 @@ function unique<T>(items: T[], key: (item: T) => string = String) {
 export async function runHook(args: Args) {
   const [, name, file] = args.positionals;
   const o = buildOpts({ ...args, values: { ...args.values, staged: name === "pre-commit" } });
-  if (name === "pre-commit") return exitWith(partlyStaged(o) ?? (await runCheck(o)));
+  if (name === "pre-commit") return advise(partlyStaged(o), (await runCheck(o)).text);
   if (name === "commit-msg") return commitMsg(o, file);
-  if (name === "pre-push") return exitWith(await prePush(o, readFileSync(0, "utf8")));
+  if (name === "pre-push") return advise((await prePush(o, readFileSync(0, "utf8"))).text);
   refuse(`unknown hook ${name}; expected pre-commit | commit-msg | pre-push`);
 }
 
@@ -339,10 +351,11 @@ function restorePrevious(repo: string) {
   return `, core.hooksPath restored to ${prev}`;
 }
 
-// ---- agent Stop: one JSON contract shared by Claude Code and Codex (pi calls it too)
-// stdin {cwd, session_id}; stdout {} to allow, {decision:"block", reason} to continue.
-// One block per distinct red verdict per session, tracked here: stop_hook_active is also true when
-// another Stop hook blocked, so it cannot tell whether this gate already had its retry.
+// ---- agent Stop: one JSON contract shared by Claude Code and Codex (pi, omp and OpenCode call it too)
+// stdin {cwd, session_id[, deliver:"inline"]}; stdout {} or {systemMessage}. The Stop never holds the
+// turn: a verdict with findings this session has not seen yet becomes a note for the agent's next turn.
+// Claude Code and Codex read it through agent-notes (UserPromptSubmit), an adapter asks for it inline
+// ({note}) and hands it to its own next-turn channel. The user sees a short systemMessage now.
 
 function stopInput() {
   const raw = readFileSync(0, "utf8");
@@ -351,16 +364,16 @@ function stopInput() {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("expected object");
     return input;
   } catch {
-    // Exit 1, not 2: for Claude Code exit 2 means "block", and a broken caller would trap the agent.
+    // Exit 1, not 2: for Claude Code exit 2 means "block", and the Stop never holds the agent.
     console.log(JSON.stringify({ systemMessage: "code-quality Stop hook received invalid JSON input" }));
     console.error("agent-stop: stdin is not the Stop hook JSON");
     process.exit(1);
   }
 }
 
-const markerPath = (repo: string, outDir: string) => join(repo, outDir, "stop-block.json");
+const markerPath = (repo: string, outDir: string) => join(repo, outDir, "stop-note.json");
 
-function alreadyBlocked(state: StopState, key: string) {
+function alreadyShown(state: StopState, key: string) {
   const path = markerPath(state.repo, state.outDir);
   return existsSync(path) && readFileSync(path, "utf8") === key;
 }
@@ -414,8 +427,8 @@ function sessionTouched(args: Args, state: StopState, session: string) {
   }
 }
 
-// The repo and the directory its state files live in: a broken config must not trap the agent, so
-// the default out_dir stands in when the config cannot be read.
+// The repo and the directory its state files live in: the default out_dir stands in when the config
+// cannot be read, so a broken config still gets its note.
 export type StopState = { repo: string; outDir: string };
 
 function stopState(args: Args, repo: string): StopState {
@@ -433,7 +446,8 @@ export async function agentStop(args: Args) {
     if (typeof session !== "string" || !session.trim()) throw new Error("missing session_id/sessionId");
     const state = stopState(args, stopRepo(input.cwd ?? process.cwd()));
     const r = await stopResult(args, state, session);
-    console.log(JSON.stringify(r.ok ? {} : redAnswer(state, session, r)));
+    const note = r.ok ? "" : stopNote(state, session, r);
+    console.log(JSON.stringify(stopAnswer(note, session, input.deliver === "inline")));
   } catch (error) {
     console.log(JSON.stringify({ systemMessage: `code-quality Stop hook failed: ${(error as Error).message}` }));
     process.exit(1);
@@ -445,11 +459,57 @@ async function stopResult(args: Args, state: StopState, session: string): Promis
   return stopVerdict(args, state.repo);
 }
 
-// The key holds only the deterministic red lines: a Jev note that changes (timeout, drift) between two
-// Stops must not count as a new verdict and block the agent a second time.
-export function redAnswer(state: StopState, session: string, r: Verdict) {
+// The key holds only the deterministic lines: a Jev note that changes (timeout, drift) between two
+// Stops must not count as a new verdict and show the same findings again. "" = already shown.
+export function stopNote(state: StopState, session: string, r: Verdict) {
   const key = JSON.stringify([session, r.verdict ?? r.text]);
-  if (alreadyBlocked(state, key)) return { systemMessage: `quality gate still red after one retry:\n${r.text}` };
+  if (alreadyShown(state, key)) return "";
   remember(state, key);
-  return { decision: "block", reason: `Quality gate is red in ${state.repo}. Fix before finishing:\n${r.text}` };
+  return `code-quality report for ${state.repo} (advice; the turn was not held, you decide what to act on):\n${r.text}`;
+}
+
+// inline: the adapter delivers the note itself. Otherwise it waits for agent-notes, and the user gets
+// the red flags and the verdict line now.
+export function stopAnswer(note: string, session: string, inline: boolean) {
+  if (!note) return {};
+  if (inline) return { note };
+  queueNote(session, note);
+  const head = note.split("\n").filter((line) => /^(RED FLAG|FINDINGS|quality gate crashed)/.test(line));
+  return { systemMessage: ["code-quality (advice, nothing blocked):", ...head, "the agent gets the full report with the next message"].join("\n") };
+}
+
+// ---- agent-notes: UserPromptSubmit hands the queued Stop note to the agent once, then drops it.
+// stdin {session_id}; stdout {} or {hookSpecificOutput:{hookEventName, additionalContext}}.
+// Claude Code takes up to 10 000 characters of context; the rest is in the report file.
+const NOTE_MAX = 9000;
+const notePath = (session: string) => join(pluginHome(), "notes", `${createHash("sha256").update(session).digest("hex").slice(0, 32)}.txt`);
+
+function queueNote(session: string, note: string) {
+  const path = notePath(session);
+  mkdirSync(dirname(path), { recursive: true });
+  const report = note.split("\n").find((line) => line.startsWith("report: ")) ?? "";
+  writeFileSync(path, note.length > NOTE_MAX ? `${note.slice(0, NOTE_MAX)}\n... cut, the rest is in the ${report || "report file"}` : note);
+}
+
+// The queued note of this session, removed as it is read; "" when there is none.
+function takeNote(input: any) {
+  const session = input?.session_id ?? input?.sessionId ?? "";
+  const path = typeof session === "string" && session.trim() ? notePath(session) : "";
+  if (!path || !existsSync(path)) return "";
+  const note = readFileSync(path, "utf8");
+  rmSync(path, { force: true });
+  return note;
+}
+
+// Exit 1 on a broken input: a non-blocking error for UserPromptSubmit, the prompt goes on.
+export function agentNotes(_args: Args) {
+  try {
+    const input = JSON.parse(readFileSync(0, "utf8"));
+    const note = takeNote(input);
+    const event = input.hook_event_name ?? input.hookEventName ?? "UserPromptSubmit";
+    console.log(JSON.stringify(note ? { hookSpecificOutput: { hookEventName: event, additionalContext: note } } : {}));
+  } catch (error) {
+    console.log(JSON.stringify({ systemMessage: `code-quality agent-notes failed: ${(error as Error).message}` }));
+    process.exit(1);
+  }
 }

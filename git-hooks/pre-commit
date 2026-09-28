@@ -1,9 +1,15 @@
 #!/bin/sh
 # code-quality pre-commit: installed per repo by `quality.ts install-hooks <repo>` (core.hooksPath).
-# Own verdict first; green = the repo's own pre-commit runs (hooks/_chain).
+# Prints the report (red flags first), then the repo's own pre-commit runs (_chain). Never blocks.
 here=$(dirname "$0")
-# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone.
+# The newest plugin copy invoked on this machine (hooks.ts updatePluginRoot); the last one if it is gone;
+# with neither, no report and the repo's own hook still runs.
 root=$(cat "$here/../hooks-root" 2>/dev/null)
-[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root") || exit 2
-bun "$root/scripts/quality.ts" hook pre-commit --repo "$(git rev-parse --show-toplevel)" || exit $?
+[ -f "$root/scripts/quality.ts" ] || root=$(cat "$here/../root" 2>/dev/null)
+if [ -f "$root/scripts/quality.ts" ]; then
+  bun "$root/scripts/quality.ts" hook pre-commit --repo "$(git rev-parse --show-toplevel)"
+  # Advice never stops git; an interrupt (Ctrl-C, kill) still does.
+  code=$?
+  [ "$code" -gt 128 ] && exit "$code"
+fi
 exec "$here/_chain" pre-commit "$@"

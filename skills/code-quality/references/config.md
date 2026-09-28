@@ -24,7 +24,7 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   (`npm`, `pypi`, `crates`, `go`, `rubygems`, `packagist`, `pub`, `nuget`, `maven`, `deps.dev`),
   for a mirror: `registry_urls = { npm = "https://mirror.local/npm/{name}" }`. `{name}`, `{version}`,
   `{system}`, `{group}` and `{artifact}` are filled in. An empty value means the ecosystem has no
-  registry: `deps/lock-age: not checked (no registry for <ecosystem>)`, never a block. An unknown
+  registry: `deps/lock-age: not checked (no registry for <ecosystem>)`, never a finding. An unknown
   ecosystem is a config error.
 - `[escalate] paths` - path globs for "always to the reviewer".
 - `[tools]` - one entry per external tool, the id from `scripts/lib/tools.ts`
@@ -97,7 +97,7 @@ Sections and keys (defaults in `scripts/lib/config.ts`, `DEFAULTS`):
   questions: `[[review.jev_questions]]` tables with `id`, `files`, `trigger`, `instructions`,
   `criteria = { true = "...", false = "..." }`, `note`, optional `threshold` (0.7) and `below`
   (see the Jev reference). `llm` is not wired yet, `true` gives one `note:` line.
-  Reviewers never block.
+  Reviewers write notes only.
 
 The list of guarded keys and the rule for changing them together with sources is in
 "Bypasses and their trace".
@@ -105,14 +105,15 @@ The list of guarded keys and the rule for changing them together with sources is
 ## Git hooks
 
 
-`install-hooks <repo>` writes a stable `core.hooksPath` under `~/.local/share/code-quality/git-hooks/` (override with `CODE_QUALITY_HOME`). Its `hooks-root` names the plugin copy the hooks run: the newest copy an agent invoked on this machine through `agent-stop` or `guard-bash`, or the last one when that copy is gone (`root`). Only those two entry points and `install-hooks` write `root` and `hooks-root`; a copy run by hand (`check`, `mutant`, the full gate, `hook ...`) leaves both alone. The repo's own hooks (Git LFS, husky, anything else) keep working: every wrapper calls the previous hook with the same arguments and returns its exit code. `uninstall-hooks <repo>` puts the old value back. `[hooks] block_bypass = false` disables the agent shell guard; the default is `true`.
+`install-hooks <repo>` writes a stable `core.hooksPath` under `~/.local/share/code-quality/git-hooks/` (override with `CODE_QUALITY_HOME`). Its `hooks-root` names the plugin copy the hooks run: the newest copy an agent invoked on this machine through `agent-stop` or `guard-bash`, or the last one when that copy is gone (`root`). Only those two entry points and `install-hooks` write `root` and `hooks-root`; a copy run by hand (`check`, `mutant`, the full gate, `hook ...`) leaves both alone. The repo's own hooks (Git LFS, husky, anything else) keep working: every wrapper prints the code-quality report, never stops git on it (only an interrupt, exit above 128, does), then calls the previous hook with the same arguments and returns its exit code. `uninstall-hooks <repo>` puts the old value back. `[hooks] flag_bypass = false` silences the red flag of the agent shell guard on commands that skip the hooks; `block_bypass` is its old name and is still read (either one `false` silences it). The default is `true`.
 
 ## Stop hooks
 
-The git hooks catch commits. The Stop hooks catch the state before a commit: when the agent ends a turn, the adapter runs `check` and answers with the hook contract.
+The git hooks report on commits. The Stop hooks report on the state before a commit: when the agent ends a turn, the adapter runs `check`. The turn ends as the agent chose; the Stop never answers `decision: block`.
 
-- Claude Code: one more group in `hooks.Stop` of `~/.claude/settings.json`;
-- Codex: one more group in `hooks.Stop` of `~/.codex/hooks.json`, then trust it through `/hooks`;
-- pi: an extension on `agent_settled`, one follow-up message per chain.
+- Claude Code and Codex: `agent-stop` on `Stop` and `agent-notes` on `UserPromptSubmit` (both in [hooks/hooks.json](../../../hooks/hooks.json); Codex asks to trust them through `/hooks`). When the change has findings, `agent-stop` returns a `systemMessage` with the red flags and the findings line for the user and queues the full report under `<CODE_QUALITY_HOME>/notes/`; `agent-notes` hands it to the agent as `additionalContext` with the next message, once.
+- pi and omp: the Stop note goes to the next turn through `sendMessage(..., { deliverAs: "nextTurn" })`.
+- OpenCode: the note is added to the session without a reply.
+- Grok: `install-grok-hooks` wires `Stop` and the shell guard; Grok drops UserPromptSubmit context, so the Stop report reaches the user only.
 
-A red gate returns `{"decision": "block", "reason": ...}` and the agent gets one round of fixes. The same red verdict a second time in the same session returns a `systemMessage` instead of another block, so the loop is bounded. Plugin hook definitions are in [hooks/hooks.json](../../../hooks/hooks.json).
+The same findings a second time in the same session are not shown again.

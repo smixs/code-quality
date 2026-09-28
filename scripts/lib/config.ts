@@ -36,7 +36,8 @@ export const DEFAULTS = {
   secrets: { allow_users: [] as string[] },
   // registry_urls: ecosystem -> URL template for the lock-age lookup (a mirror; "" = no registry).
   security: { gitleaks: true, audit: true, registry_urls: {} as Record<string, string> },
-  hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40, block_bypass: true },
+  // flag_bypass: a red flag on git commands that skip the hooks; block_bypass is its old name, still read.
+  hooks: { pre_push_test_cmd: "", pre_push_timeout: 60, pre_push_max_tests: 40, flag_bypass: true, block_bypass: true },
   // Every test run the gate starts waits while the 1-minute load is above max_load (0 = no wait). The
   // default is 2 x CPUs: a shared machine idles near its CPU count, a second heavy run still waits.
   // touched_cmd: coverage of `check --tests`; mutant_cmd: the tests of `mutant`. {files} = the test list.

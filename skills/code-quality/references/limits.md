@@ -8,19 +8,20 @@
   and keeps going. There is no automatic install.
 - `deps/lock-age` understands text `bun.lock`, npm lockfile v2/v3, `pnpm-lock.yaml`, `uv.lock`
   and `poetry.lock`. Local, workspace, git and file dependencies have no registry date and are skipped.
-- No network, or no local OSV database - not a block. `deps/lock-age` writes `not checked (offline)`,
+- No network, or no local OSV database - not a finding. `deps/lock-age` writes `not checked (offline)`,
   and OSV Scanner gives `not run: deps/audit (OSV database unavailable)`. A missing lockfile is
   different and gives `not run: deps/audit (osv-scanner: no packages found)`. An unreadable answer or
-  another tool failure stays a gate error.
+  another tool failure stays an `ERROR` line.
 - `cycles`, `dead`, `form` and `audit` findings are kept in the baseline under shared keys. A new
-  finding blocks, an existing one stays debt. An old baseline without the adapter lists asks for
+  finding is reported, an existing one stays debt. An old baseline without the adapter lists asks for
   `--update-baseline` and does not declare the old debt new.
 
 ## Working tree, hooks, tools
 
-- The analysis reads the working tree, so `pre-commit` refuses when a staged file also has unstaged
-  edits (a partial `git add -p`): otherwise the commit would carry text that was never checked. Fix:
-  stage the file whole, or `git stash push --keep-index`, commit, `git stash pop`.
+- The analysis reads the working tree, so when a staged file also has unstaged edits (a partial
+  `git add -p`) `pre-commit` reports on the working-tree text and says so in a `note: partly staged`
+  line; the commit goes ahead. For a report on the commit itself: stage the file whole, or
+  `git stash push --keep-index`, commit, `git stash pop`.
 - `doc/symbol` does not know external names: a field of someone else's API or library in backticks
   (`accessNotConfigured`) looks like a missing symbol.
 - An anonymous function's name is the eslint label, `#n` by order in the file: a new anonymous function
@@ -28,8 +29,7 @@
 - jscpd runs on changed files only: a clone of changed code with an unchanged file stays invisible.
 - Native `cycles`, `dead`, `form` and `audit` are not swapped for another language's tool. When an
   adapter command is not installed, the report writes the exact `not run` with the install command.
-- The very first commit of a repo (no HEAD yet) is not checked by the hooks: the report fails on
-  `git rev-parse HEAD`. Make the first commit with `--no-verify`, the hook works from there.
+- The very first commit of a repo (no HEAD yet) is judged against the empty tree.
 - The script's own tests: `bun test scripts/` in the plugin root (seam behaviour, Jev with a stubbed
   HTTP layer, one `check` run on a temporary repo, the hook chain with `.git/hooks` and with a husky
   path, the Stop key; the script's own mean CRAP is 3.6 at the coverage from these tests).
@@ -38,8 +38,9 @@
 - Flaky tests move coverage: on a changed function that can give a false CRAP > 30, rerun.
 - `pre-push` runs the touched tests on the working tree, and only after two checks: every pushed ref
   that adds files peels to `HEAD` of the checkout, and the files of the pushed ranges and the selected
-  tests have no uncommitted changes; otherwise it blocks before any test runs (push from a checkout of
-  that commit). Dirt elsewhere in the tree does not block. It prints `touched tests: N
+  tests have no uncommitted changes; otherwise the tests do not run, `touched tests not run` says why,
+  and the push goes ahead (push from a checkout of that commit to have them run). Dirt elsewhere in
+  the tree does not matter. It prints `touched tests: N
   by name, M by import`; importers are searched one level deep and cut off by the shared
   `hooks.pre_push_max_tests` limit. The first push of a new branch without `project.base` (no
   `origin/main`) takes the diff from the parent, the root commit from an empty tree.

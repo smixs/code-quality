@@ -1,15 +1,14 @@
-import { denied, invoke } from "./invoke.ts";
+import { flagResult, stopNote } from "./invoke.ts";
 
+// Advice only: a hook bypass gets a red flag on the command's result, the Stop report waits for the
+// next turn. Nothing blocks a tool call or continues the session.
 export default function (omp: any) {
-  omp.on("tool_call", async (event: any, ctx: any) => {
+  omp.on("tool_result", async (event: any, ctx: any) => {
     if (event.toolName !== "bash") return;
-    const result = await invoke("guard-bash", { cwd: ctx.cwd, tool_name: "bash", tool_input: event.input }, ctx.cwd);
-    const reason = denied(result);
-    if (reason) return { block: true, reason };
+    return await flagResult(ctx.cwd, event.input, event.content);
   });
   omp.on("session_stop", async (event: any, ctx: any) => {
-    const result = await invoke("agent-stop", { cwd: ctx.cwd, session_id: event.session_id }, ctx.cwd);
-    if (result.output?.decision === "block") return { decision: "block", reason: result.output.reason };
-    if (result.code !== 0 || !result.output) return { decision: "block", reason: `code-quality Stop failed: ${result.error}` };
+    const note = await stopNote(ctx.cwd, event.session_id);
+    if (note) omp.sendMessage({ customType: "code-quality-report", content: note, display: false }, { deliverAs: "nextTurn" });
   });
 }

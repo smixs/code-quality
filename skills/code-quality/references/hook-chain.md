@@ -27,7 +27,7 @@ of the remote; LFS also gets `post-checkout` and `post-commit`; a husky layout `
 runs `.husky/pre-commit`, and `uninstall-hooks` restores `.husky/_`. Tests: `pipeline.test.ts`,
 block `install-hooks chains the repo's own hooks` (including a `--global` `core.hooksPath`).
 Repeat on 19.09.2026 in a scratch clone of another repo with `lfs.url=file://<bare>`: a commit with
-complexity 12 was stopped, a clean first commit went through, `git-lfs pre-push` was called through
+complexity 12 was stopped (since the advise mode of 28.09.2026 it goes through with the finding printed), a clean first commit went through, `git-lfs pre-push` was called through
 `git-hooks/pre-push`, the object landed in `lfs/objects` of the local bare repo, and the push log held no
 `https://` at all.
 

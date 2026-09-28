@@ -9,7 +9,7 @@ import { buildOpts, DEFAULTS, loadToml, readArgs } from "./config.ts";
 import { runFullTests, type Tests } from "./crap.ts";
 import { changes, parseDiff } from "./diff.ts";
 import { gate, type Analysis } from "./gate.ts";
-import { PREV_KEY, pushRanges, redAnswer, runCheck } from "./hooks.ts";
+import { PREV_KEY, pushRanges, runCheck, stopNote } from "./hooks.ts";
 import { jevNotes, type Post } from "./jev.ts";
 import { failCount } from "./report.ts";
 import { commitMsgFindings, docCheck } from "./text.ts";
@@ -55,7 +55,7 @@ describe("parseDiff", () => {
 });
 
 describe("commit-msg", () => {
-  test("blocks a Co-Authored-By tool trailer", () => {
+  test("notes a Co-Authored-By tool trailer", () => {
     const f = commitMsgFindings(noGlossary, "fix: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n");
     expect(f.map((x) => x.line)).toContain(3);
   });
@@ -172,11 +172,34 @@ describe("agent-stop", () => {
     const ifs = Array.from({ length: 11 }, (_, i) => `  if (x === ${i}) return ${i};`).join("\n");
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs}\n  return -1;\n}\n`);
     sh(repo, "git add src/a.ts");
-    expect(JSON.parse(stop().stdout).decision).toBe("block");
+    const red = spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, session_id: "s1" }), encoding: "utf8", env: testEnv });
+    const answer = JSON.parse(red.stdout);
+    expect([red.status, answer.decision, answer.hookSpecificOutput, /^FINDINGS \(\d+\)/m.test(answer.systemMessage)]).toEqual([0, undefined, undefined, true]);
     const camel = spawnSync("bun", [SCRIPT, "agent-stop", "--no-deps"], { input: JSON.stringify({ cwd: repo, sessionId: "camel" }), encoding: "utf8", env: testEnv });
-    expect(JSON.parse(camel.stdout).decision).toBe("block");
+    expect([camel.status, JSON.parse(camel.stdout).decision, typeof JSON.parse(camel.stdout).systemMessage]).toEqual([0, undefined, "string"]);
   }, 120_000);
-  test("a Jev note that changes between two Stops does not block a second time; a new red verdict does", async () => {
+  test("the Stop note reaches the agent once, on its next prompt; inline hands it to the adapter", () => {
+    const repo = tmp();
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, ".quality.toml"), '[project]\nlanguage = "ts"\nsrc = ["src"]\nbase = "HEAD"\n');
+    writeFileSync(join(repo, ".gitignore"), ".scratch/\n");
+    writeFileSync(join(repo, "src/k.ts"), "export const k = 1;\n");
+    sh(repo, "git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init");
+    writeFileSync(join(repo, "src/k.ts"), 'export const k = "AKIA' + "ABCDEFGHIJKLMNOP" + '";\n');
+    const quality = (cmd: string, input: object) => spawnSync("bun", [SCRIPT, cmd, "--no-deps"], { input: JSON.stringify(input), encoding: "utf8", env: testEnv });
+    const notes = () => JSON.parse(quality("agent-notes", { session_id: "n1", hook_event_name: "UserPromptSubmit" }).stdout);
+    expect(notes()).toEqual({});
+    const stop = JSON.parse(quality("agent-stop", { cwd: repo, session_id: "n1" }).stdout);
+    expect(stop.systemMessage.split("\n")[1]).toStartWith("RED FLAG: secret/token  src/k.ts:1");
+    const context = notes().hookSpecificOutput;
+    expect([context.hookEventName, context.additionalContext.split("\n")[1]]).toEqual(["UserPromptSubmit", stop.systemMessage.split("\n")[1]]);
+    expect(notes()).toEqual({});
+    expect(JSON.parse(quality("agent-stop", { cwd: repo, session_id: "n1" }).stdout)).toEqual({});
+    const inline = JSON.parse(quality("agent-stop", { cwd: repo, session_id: "n2", deliver: "inline" }).stdout);
+    expect([Object.keys(inline), inline.note.includes("RED FLAG: secret/token")]).toEqual([["note"], true]);
+    expect(JSON.parse(quality("agent-notes", { session_id: "n2" }).stdout)).toEqual({});
+  }, 120_000);
+  test("a Jev note that changes between two Stops is not shown a second time; a new verdict is", async () => {
     const repo = tmp();
     mkdirSync(join(repo, "src"));
     writeFileSync(join(repo, ".quality.toml"), '[project]\nlanguage = "ts"\nsrc = ["src"]\nbase = "HEAD"\n[review]\njev = true\n');
@@ -196,9 +219,9 @@ describe("agent-stop", () => {
     const first = await runCheck(o, { env: KEY_ENV, post: timeout });
     const second = await runCheck(o, { env: KEY_ENV, post: answer });
     expect([first.ok, first.text === second.text]).toEqual([false, false]);
-    expect([redAnswer(stopState, "s", first), redAnswer(stopState, "s", second)].map((r) => Object.keys(r)[0])).toEqual(["decision", "systemMessage"]);
+    expect([stopNote(stopState, "s", first) !== "", stopNote(stopState, "s", second)]).toEqual([true, ""]);
     writeFileSync(join(repo, "src/a.ts"), `export function a(x: number) {\n${ifs(14)}\n  return -1;\n}\n`);
-    expect(redAnswer(stopState, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toHaveProperty("decision", "block");
+    expect(stopNote(stopState, "s", await runCheck(o, { env: KEY_ENV, post: answer }))).toContain("complexity 15 > 10");
   }, 120_000);
   test("stdin that is not JSON is an error with JSON output (exit 1), not an allow", () => {
     const r = spawnSync("bun", [SCRIPT, "agent-stop"], { input: "garbage", encoding: "utf8", env: testEnv });
@@ -379,7 +402,7 @@ test_cmd = '(printf "TN:\\n" > "$QG_LCOV"; printf " 0 fail\\n 2 fail\\n"; exit 1
     writeFileSync(join(repo, "a.ts"), "export const a = (x: number) => x;\n");
     writeFileSync(join(repo, "README.md"), "See `lib/kept.ts`.\n");
     const green = await runCheck(opts());
-    expect([green.ok, green.text.split("\n")[1]]).toEqual([true, "GATE PASS"]);
+    expect([green.ok, green.text.split("\n")[1]]).toEqual([true, "CLEAN"]);
   }, 120_000);
 
   test("writes accepted bypasses to the Bypasses section in Markdown and JSON", async () => {

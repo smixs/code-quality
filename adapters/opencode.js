@@ -21,17 +21,17 @@ function invoke(action, input, cwd) {
   });
 }
 
-async function guard(input, cwd) {
-  const response = await invoke("guard-bash", { cwd, tool_name: "bash", tool_input: input }, cwd);
-  const reason = response.result?.hookSpecificOutput?.permissionDecisionReason;
-  if (reason) throw new Error(reason);
-  if (response.code !== 0) throw new Error("code-quality guard failed");
+// Advice only: nothing here blocks a tool call or resumes a session. A hook bypass gets a red flag,
+// the Stop report is added to the session without a reply.
+async function flag(input, cwd) {
+  const response = await invoke("guard-bash", { cwd, tool_name: "bash", tool_input: input }, cwd).catch(() => null);
+  return response?.result?.hookSpecificOutput?.additionalContext ?? "";
 }
 
 async function stop(cwd, sessionID) {
-  const response = await invoke("agent-stop", { cwd, session_id: sessionID }, cwd);
-  if (response.code !== 0) throw new Error("code-quality Stop failed");
-  return response.result?.decision === "block" ? response.result.reason : "";
+  const response = await invoke("agent-stop", { cwd, session_id: sessionID, deliver: "inline" }, cwd).catch(() => null);
+  if (!response || response.code !== 0) return "code-quality Stop failed (nothing was held)";
+  return response.result?.note ?? "";
 }
 
 const v1 = {
@@ -39,8 +39,10 @@ const v1 = {
     const cwd = ctx?.directory ?? process.cwd();
     return {
       config: async (config) => { config.skills = [...new Set([...(config.skills ?? []), skillDir])]; },
-      "tool.execute.before": async (input, output) => {
-        if (input.tool === "bash") await guard(output.args, input.directory ?? cwd);
+      "tool.execute.after": async (input, output) => {
+        if (input.tool !== "bash") return;
+        const text = await flag(input.args, input.directory ?? cwd);
+        if (text) output.output = `${text}\n${output.output ?? ""}`;
       },
       event: async ({ event }) => {
         if (event.type !== "session.idle") return;
@@ -72,8 +74,10 @@ export default {
       await ctx.skill.transform((editor) => {
         editor.add({ id: "code-quality", name: "code-quality", description, location: skill, content });
       });
-      await ctx.tool.hook("execute.before", async (event) => {
-        if (event.tool === "bash") await guard(event.input, cwd);
+      await ctx.tool.hook("execute.after", async (event) => {
+        if (event.tool !== "bash") return;
+        const text = await flag(event.input, cwd);
+        if (text) await ctx.session.synthetic({ sessionID: event.sessionID, text, resume: false });
       });
       const controller = new AbortController();
       void (async () => {

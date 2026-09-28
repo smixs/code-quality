@@ -1,5 +1,6 @@
-// pre-push judges the pushed commit: the touched tests run on the checked-out tree, so that tree must
-// be the pushed commit, clean in the files the tests read. Spawned: bun scripts/quality.ts hook pre-push.
+// pre-push reports on the pushed commit and never stops the push: the touched tests run on the
+// checked-out tree, so they run only when that tree is the pushed commit, clean in the files the tests
+// read. Red tests are a red flag, first line. Spawned: bun scripts/quality.ts hook pre-push.
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
@@ -32,19 +33,19 @@ function push(checkout: string, lines: string[]) {
 
 // The remote already has the base commit, so the range is base..B.
 const branch = (c: { b: string; base: string }) => `refs/heads/B ${c.b} refs/heads/B ${c.base}`;
-const wrongTree = (sha: string, head: string) => `pre-push: pushing ${sha} (refs/heads/B), this checkout is at ${head}; touched tests run on the checked-out tree, push from a checkout of that commit`;
+const wrongTree = (sha: string, head: string) => `pre-push: touched tests not run: pushing ${sha} (refs/heads/B), this checkout is at ${head}; they run on the checked-out tree, push from a checkout of that commit to run them`;
 
-describe("pre-push judges the pushed commit", () => {
-  test("a branch pushed from a checkout at another commit is blocked; its tests do not start", () => {
+describe("pre-push reports on the pushed commit and lets the push go", () => {
+  test("a branch pushed from a checkout at another commit goes, with a note; its tests do not start", () => {
     const c = twoCheckouts(NEG_TEST);
     const r = push(c.main, [branch(c)]);
-    expect([r.status === 0, r.out.includes(wrongTree(git(c.main, "rev-parse", "--short", c.b), git(c.main, "rev-parse", "--short", "HEAD"))), r.started]).toEqual([false, true, false]);
+    expect([r.status, r.out.includes(wrongTree(git(c.main, "rev-parse", "--short", c.b), git(c.main, "rev-parse", "--short", "HEAD"))), r.started]).toEqual([0, true, false]);
   }, 60_000);
 
-  test("a red branch pushed from a green checkout is blocked, not passed", () => {
+  test("a red branch pushed from a green checkout is not reported green", () => {
     const c = twoCheckouts(RED_NEG);
     const r = push(c.main, [branch(c)]);
-    expect([r.status === 0, r.out.includes("this checkout is at"), r.started]).toEqual([false, true, false]);
+    expect([r.status, r.out.includes("touched tests not run"), r.out.includes("pass"), r.started]).toEqual([0, true, false, false]);
   }, 60_000);
 
   test("the same push from the branch's own worktree runs the tests as before", () => {
@@ -53,21 +54,22 @@ describe("pre-push judges the pushed commit", () => {
     expect([ok.status, ok.started, ok.out.includes("pre-push: 1 touched test file(s) pass")]).toEqual([0, true, true]);
     const red = twoCheckouts(RED_NEG);
     const failed = push(red.wt, [branch(red)]);
-    expect([failed.status, failed.started, failed.out.includes("pre-push: 1 touched test file(s) exit 1")]).toEqual([1, true, true]);
+    expect([failed.status, failed.started, failed.out.includes("pre-push: 1 touched test file(s) exit 1")]).toEqual([0, true, true]);
+    expect(failed.out.split("\n")[0]).toStartWith("RED FLAG: pushing with red tests: 1 touched test file(s) exit 1 -- the pushed commit breaks what its own tests check; check: read ");
   }, 60_000);
 
-  test("uncommitted edits in a selected test or a deleted pushed file block with the path; tests do not run", () => {
+  test("uncommitted edits in a selected test or a deleted pushed file are named; tests do not run, the push goes", () => {
     const edited = twoCheckouts(NEG_TEST);
     write(edited.wt, "src/calc.test.ts", nodeTest(ADD_TEST));
     const r1 = push(edited.wt, [branch(edited)]);
-    expect([r1.status === 0, r1.out.includes("pre-push: uncommitted changes in files the touched tests read: src/calc.test.ts; commit or stash them"), r1.started]).toEqual([false, true, false]);
+    expect([r1.status, r1.out.includes("pre-push: touched tests not run: uncommitted changes in files they read: src/calc.test.ts; commit or stash them to run the tests"), r1.started]).toEqual([0, true, false]);
     const deleted = twoCheckouts(NEG_TEST);
     rmSync(join(deleted.wt, "src/calc.ts"));
     const r2 = push(deleted.wt, [branch(deleted)]);
-    expect([r2.status === 0, r2.out.includes("files the touched tests read: src/calc.ts;"), r2.started]).toEqual([false, true, false]);
+    expect([r2.status, r2.out.includes("files they read: src/calc.ts;"), r2.started]).toEqual([0, true, false]);
   }, 60_000);
 
-  test("an unrelated dirty file does not block", () => {
+  test("an unrelated dirty file does not stop the tests", () => {
     const c = twoCheckouts(NEG_TEST);
     write(c.wt, "README.md", "edited\n");
     write(c.wt, "notes.txt", "scratch\n");
@@ -96,15 +98,15 @@ describe("pre-push judges the pushed commit", () => {
     }, 60_000);
   }
 
-  test("a detached HEAD at the pushed commit runs the tests; detached elsewhere is blocked", () => {
+  test("a detached HEAD at the pushed commit runs the tests; detached elsewhere skips them with a note", () => {
     const at = twoCheckouts(NEG_TEST);
     git(at.wt, "checkout", "-q", "--detach", at.b);
     const ok = push(at.wt, [`HEAD ${at.b} refs/heads/B ${at.base}`]);
     expect([ok.status, ok.started]).toEqual([0, true]);
     const off = twoCheckouts(NEG_TEST);
     git(off.wt, "checkout", "-q", "--detach", off.base);
-    const blocked = push(off.wt, [`HEAD ${off.b} refs/heads/B ${off.base}`]);
-    expect([blocked.status === 0, blocked.out.includes("pre-push: pushing"), blocked.out.includes("(HEAD), this checkout is at"), blocked.started]).toEqual([false, true, true, false]);
+    const skipped = push(off.wt, [`HEAD ${off.b} refs/heads/B ${off.base}`]);
+    expect([skipped.status, skipped.out.includes("pre-push: touched tests not run: pushing"), skipped.out.includes("(HEAD), this checkout is at"), skipped.started]).toEqual([0, true, true, false]);
   }, 60_000);
 
   test("a deletion push checks nothing and runs nothing", () => {

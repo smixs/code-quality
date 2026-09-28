@@ -134,10 +134,30 @@ export function failCount(checks: Check[]) {
   return checks.reduce((n, c) => n + c.findings.length + (c.error ? 1 : 0), 0);
 }
 
+// Red flags: what can do real harm if the agent goes along with it. Nothing is blocked; these lines
+// go first in every output, loud, and the agent decides. Everything else is a finding to look at.
+const FLAGS: { rule: RegExp; danger: string; verify: string }[] = [
+  { rule: /^tamper\/(?!no-tests-ran$)/, danger: "a green run stops proving the code works", verify: "is the test change intended? restore it, or say why in the commit message" },
+  { rule: /^secret\/(?:token|env-file|gitleaks)$/, danger: "a committed secret stays in git history and has to be rotated", verify: "is it a real credential? move it to the environment or a secret store; rotate it if it was pushed" },
+];
+
+const flagOf = (rule: string) => FLAGS.find((f) => f.rule.test(rule));
+
+export const isRedFlag = (f: { rule: string }) => flagOf(f.rule) !== undefined;
+
+export const redFlag = (what: string, danger: string, verify: string) => `RED FLAG: ${what} -- ${danger}; check: ${verify}`;
+
+export function redFlags(checks: Check[]) {
+  return checks.flatMap((c) => c.findings.flatMap((f) => {
+    const flag = flagOf(f.rule);
+    return flag ? [redFlag(findingLine(f), flag.danger, flag.verify)] : [];
+  }));
+}
+
 export function verdictText(checks: Check[], a: Analysis, allowRed: boolean) {
   const bad = checks.filter((c) => c.findings.length || c.error);
-  const rows = bad.flatMap((c) => (c.error ? [`${c.name}: ERROR ${c.error}`] : c.findings.slice(0, 15).map(findingLine)));
-  if (bad.length) return `GATE FAIL (${failCount(checks)}):\n${rows.slice(0, 40).join("\n")}`;
-  if (a.tests.red && allowRed) return `GATE: checks pass, TESTS RED allowed by --allow-red-tests (${redText(a.tests)})`;
-  return "GATE PASS";
+  const rows = bad.flatMap((c) => (c.error ? [`${c.name}: ERROR ${c.error}`] : c.findings.filter((f) => !flagOf(f.rule)).slice(0, 15).map(findingLine)));
+  if (bad.length) return `FINDINGS (${failCount(checks)}), advice, nothing blocked:${rows.length ? `\n${rows.slice(0, 40).join("\n")}` : " the red flags above"}`;
+  if (a.tests.red && allowRed) return `CLEAN: checks pass, TESTS RED allowed by --allow-red-tests (${redText(a.tests)})`;
+  return "CLEAN";
 }

@@ -34,10 +34,10 @@ function checkSource(source: string) {
 }
 
 for (const file of ["evidence-eslint-disable-codex.ts", "evidence-eslint-disable-next-line.ts"]) {
-  test(`${file} reports complexity 13 and GATE FAIL`, () => {
+  test(`${file} reports complexity 13 in FINDINGS`, () => {
     const result = checkSource(readFileSync(join(evidence, file), "utf8"));
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain("GATE FAIL");
+    expect(result.stdout).toContain("FINDINGS (");
     expect(result.stdout).toContain("complexity 13 > 10");
   }, 120_000);
 }
