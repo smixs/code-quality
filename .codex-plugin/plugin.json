@@ -1,6 +1,6 @@
 {
   "name": "code-quality",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "Deterministic quality advisor for coding agents and git hooks: red flags, never blocks",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"

@@ -54,6 +54,7 @@ Red flags: a secret in the change or in the pushed history, a deleted, skipped o
 
 ## What's new in 1.3
 
+- **Advice, never a block (1.3.3).** No hook stops a commit, a push, a shell command or the end of a turn. Dangerous moves are `RED FLAG` lines, first in every output; the Stop report reaches the agent once, with its next message.
 - **Accept a change by its own tests.** `check --since <base> --tests` runs every test that reaches the change through the project's imports, with coverage, and judges only the changed functions.
 - **Prove a test catches a bug.** `mutant` makes one exact mutation, runs the tests and restores the file byte for byte, even after Ctrl-C.
 - **The report is about the pushed commit.** When a push has touched tests to run, pre-push runs them only on the checked-out commit and says so otherwise.
