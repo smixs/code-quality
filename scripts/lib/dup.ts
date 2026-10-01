@@ -10,7 +10,8 @@ type Side = { name: string; start: number; end: number };
 
 // --absolute: without it jscpd names files relative to the common folder of each input group.
 function sideOf(x: any, repo: string): Side {
-  return { name: relative(realpathSync(repo), realpathSync(x.name)), start: x.start, end: x.end };
+  const abs = String(x.name).replace(/^\\\\\?\\/, "");
+  return { name: relative(realpathSync(repo), realpathSync(abs)).replaceAll("\\", "/"), start: x.start, end: x.end };
 }
 
 function toFinding(d: any, ch: Changes, repo: string): Finding | null {

@@ -46,7 +46,7 @@ function isSourceForDirs(lang: string, dirs: string[], file: string) {
 
 function inProjectDirs(dirs: string[], file: string) {
   return dirs.some((raw) => {
-    const dir = normalize(raw).replace(/^\.\/$/, ".").replace(/\/$/, "");
+    const dir = normalize(raw).replaceAll("\\", "/").replace(/^\.\/$/, ".").replace(/\/$/, "");
     return dir === "." || file === dir || file.startsWith(`${dir}/`);
   });
 }

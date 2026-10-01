@@ -219,7 +219,7 @@ export function parseLcov(path: string, repo: string) {
   const da = new Map<string, Map<number, number>>();
   let cur = new Map<number, number>();
   for (const line of readFileSync(path, "utf8").split("\n")) {
-    if (line.startsWith("SF:")) cur = lcovFile(da, relative(repo, resolve(repo, line.slice(3).trim())));
+    if (line.startsWith("SF:")) cur = lcovFile(da, relative(repo, resolve(repo, line.slice(3).trim())).replaceAll("\\", "/"));
     else if (line.startsWith("end_of_record")) cur = new Map();
     else if (line.startsWith("DA:")) addHits(cur, line.slice(3));
   }
@@ -366,7 +366,7 @@ function lizardRow(row: string[]): Fn[] {
 
 function repoFile(repo: string, file: string) {
   const clean = normalize(file);
-  return isAbsolute(clean) ? relative(repo, clean) : clean.replace(/^\.\//, "");
+  return (isAbsolute(clean) ? relative(repo, clean) : clean.replace(/^\.\//, "")).replaceAll("\\", "/");
 }
 
 function nestedRanges(fns: Fn[]) {

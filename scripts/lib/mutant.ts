@@ -4,7 +4,7 @@
 // owner.json, so a run killed with SIGKILL is restored by the next one.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, posix, relative, resolve } from "node:path";
 import { type Args, buildOpts, type Opts } from "./config.ts";
 import { parseTestSummary } from "./crap.ts";
 import { isTestFile, mutantTestCommand, type Runner, RUNNERS, testRunner } from "./lang.ts";
@@ -116,7 +116,7 @@ function regularInRepo(o: Opts, abs: string, shown: string) {
   if (!existsSync(abs)) throw new MutantError(`file not found: ${shown}`);
   const stat = lstatSync(abs);
   if (stat.isSymbolicLink() || !stat.isFile()) throw new MutantError(`not a regular file: ${shown}`);
-  const rel = relative(realpathSync(o.repo), realpathSync(abs));
+  const rel = relative(realpathSync(o.repo), realpathSync(abs)).replaceAll("\\", "/");
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new MutantError(`file is outside the repo: ${shown}`);
   return rel;
 }
@@ -139,7 +139,7 @@ function occurrences(text: Buffer, find: Buffer) {
 // --test replaces the selection: normalized repo-relative paths of regular test files.
 function explicitTests(o: Opts, given: string[]) {
   for (const test of given) {
-    if (isAbsolute(test) || normalize(test) !== test || test.startsWith("..")) throw new MutantError(`--test must be a normalized repo-relative path: ${test}`);
+    if (isAbsolute(test) || posix.normalize(test) !== test || test.startsWith("..")) throw new MutantError(`--test must be a normalized repo-relative path: ${test}`);
     regularInRepo(o, join(o.repo, test), test);
     if (!isTestFile(o.langs, test)) throw new MutantError(`--test ${test} does not match the test file pattern of ${o.lang}`);
   }
@@ -210,7 +210,7 @@ function recoverLeftover(o: Opts, state: State, fs: MutantFs) {
 function leftoverTarget(o: Opts, state: State, owner: Owner) {
   const kept = `; state kept at ${state.lock}`;
   if (realOrEmpty(String(owner.repo)) !== realOrEmpty(o.repo)) throw new MutantError(`leftover mutant state names another repo (${owner.repo})${kept}`);
-  if (isAbsolute(owner.file) || normalize(owner.file) !== owner.file || owner.file.startsWith("..")) throw new MutantError(`leftover mutant state names a path outside the repo (${owner.file})${kept}`);
+  if (isAbsolute(owner.file) || posix.normalize(owner.file) !== owner.file || owner.file.startsWith("..")) throw new MutantError(`leftover mutant state names a path outside the repo (${owner.file})${kept}`);
   const abs = resolve(o.repo, owner.file);
   if (!existsSync(abs)) return abs;
   try {

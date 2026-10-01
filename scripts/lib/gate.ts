@@ -76,7 +76,7 @@ export function isDocsOnly(o: Opts, ch: Changes) {
 
 function inProjectDirs(dirs: string[], file: string) {
   return dirs.some((raw) => {
-    const dir = normalize(raw).replace(/^\.\/$/, ".").replace(/\/$/, "");
+    const dir = normalize(raw).replaceAll("\\", "/").replace(/^\.\/$/, ".").replace(/\/$/, "");
     return dir === "." || file === dir || file.startsWith(`${dir}/`);
   });
 }
